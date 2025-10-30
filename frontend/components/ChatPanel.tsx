@@ -15,6 +15,8 @@ import {
   ChatMessage,
   useChatStore,
 } from "@/lib/store/chat-store";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -590,25 +592,27 @@ export function ChatPanel() {
           </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => {
                 void resetConversation();
               }}
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-medium text-neutral-600 hover:border-neutral-400 hover:text-neutral-800"
             >
               Reset conversation
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={() => {
                 void compressConversation();
               }}
               disabled={!sessionId || compressLoading}
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-medium text-neutral-600 hover:border-neutral-400 hover:text-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {compressLoading ? "Compressing…" : "Compress & continue"}
-            </button>
+            </Button>
           </div>
         </header>
 
@@ -648,21 +652,20 @@ export function ChatPanel() {
 
         <form onSubmit={handleSubmit} className="border-t border-neutral-200 bg-neutral-50 p-4">
           <div className="flex items-end gap-3">
-            <textarea
+            <Textarea
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
               placeholder="Ask about Bukayo Saka's execution range or scouting fit…"
-              className="h-24 flex-1 resize-none rounded-2xl border border-neutral-300 bg-white px-4 py-3 text-sm text-neutral-900 outline-none transition focus:border-neutral-500 focus:shadow-lg focus:shadow-neutral-200"
+              className="h-24 flex-1 resize-none"
             />
-            <div className="flex flex-col gap-2">
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="rounded-2xl bg-neutral-900 px-5 py-3 text-sm font-semibold text-white shadow-md transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isLoading ? "Sending…" : "Send"}
-              </button>
-            </div>
+            <Button
+              type="submit"
+              disabled={isLoading}
+              size="lg"
+              className="px-8"
+            >
+              {isLoading ? "Sending…" : "Send"}
+            </Button>
           </div>
         </form>
       </main>
