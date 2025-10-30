@@ -12,9 +12,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Literal
 from uuid import uuid4
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agentscope.agent import ReActAgent
@@ -49,6 +51,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Ensure required directories exist on startup."""
+    plots_dir = Path(__file__).parent.parent.parent / "plots"
+    plots_dir.mkdir(exist_ok=True, parents=True)
+    print(f"✓ Plots directory: {plots_dir.resolve()}")
+
 
 PersonaLiteral = Literal["Analyst", "Scouting Evaluator"]
 
@@ -165,18 +176,43 @@ async def _extract_tool_visualizations_from_memory(
 
     try:
         history = await agent.memory.get_memory()  # type: ignore[call-arg]
+        print(f"DEBUG EXTRACTION: Got {len(history)} messages from memory")
     except Exception as exc:  # pragma: no cover - memory failures should be non-fatal
         print(f"Warning: unable to read agent memory for visualizations: {exc}")
         return attachments, merged_metadata
 
     if not history:
+        print("DEBUG EXTRACTION: Memory is empty")
         return attachments, merged_metadata
 
     # examine recent messages in reverse chronology (newest first)
     recent_messages = history[-max_lookback:]
-    for hist_msg in reversed(recent_messages):
+    print(f"DEBUG EXTRACTION: Examining {len(recent_messages)} recent messages")
+
+    for idx, hist_msg in enumerate(reversed(recent_messages)):
+        msg_role = getattr(hist_msg, "role", None)
+        msg_name = getattr(hist_msg, "name", None)
+        print(f"DEBUG EXTRACTION: Message {idx}: role={msg_role}, name={msg_name}")
         metadata = getattr(hist_msg, "metadata", None)
         content = getattr(hist_msg, "content", None)
+
+        # DEBUG: Log what we found
+        has_metadata = isinstance(metadata, Mapping)
+        has_viz_marker = False
+        if has_metadata:
+            has_viz_marker = bool(metadata.get("viz_type") or metadata.get("image_data") or metadata.get("images"))
+            print(f"  - Has metadata: {has_metadata}, has_viz_marker: {has_viz_marker}")
+            if has_viz_marker:
+                print(f"    viz_type={metadata.get('viz_type')}, has_image_data={bool(metadata.get('image_data'))}, has_images={bool(metadata.get('images'))}")
+
+        has_content = content is not None
+        content_type = type(content).__name__ if has_content else None
+        print(f"  - Has content: {has_content}, type: {content_type}")
+        if isinstance(content, list):
+            print(f"    Content length: {len(content)}")
+            for i, block in enumerate(content[:3]):  # First 3 blocks
+                if isinstance(block, Mapping):
+                    print(f"    Block {i}: type={block.get('type')}")
 
         def _add_src(src: Optional[str], *, mime: Optional[str] = None, alt: Optional[str] = None, path: Optional[str] = None) -> None:
             if not src or not isinstance(src, str):
@@ -247,26 +283,162 @@ async def _extract_tool_visualizations_from_memory(
                             normalized_path = path_val.replace("\\", "/")
                             _add_src(f"/api/viz?path={normalized_path}", alt=alt, path=normalized_path)
 
-        # Extract image blocks from the tool response content
+        # Extract from tool_result blocks (AgentScope format)
         if isinstance(content, list):
             for block in content:
-                if not isinstance(block, Mapping) or block.get("type") != "image":
+                if not isinstance(block, Mapping):
                     continue
-                source = block.get("source")
-                alt = block.get("alt")
-                if not isinstance(source, Mapping):
-                    continue
-                source_type = source.get("type")
-                if source_type == "base64":
-                    data = source.get("data")
-                    mime = source.get("media_type") or "image/png"
-                    if isinstance(data, str) and data:
-                        _add_src(f"data:{mime};base64,{data}", mime=mime, alt=alt)
-                elif source_type == "url":
-                    url = source.get("url")
-                    mime = source.get("media_type")
-                    if isinstance(url, str) and url:
-                        _add_src(url, mime=mime, alt=alt)
+
+                # Check if this is a tool_result block
+                if block.get("type") == "tool_result":
+                    print(f"    Found tool_result block!")
+
+                    # AgentScope stores the ToolResponse in the 'output' field
+                    tool_output = block.get("output")
+
+                    # DEBUG: Show what's in the tool_result
+                    print(f"      Block keys: {list(block.keys())}")
+                    print(f"      tool_output type: {type(tool_output).__name__ if tool_output else 'None'}")
+
+                    if not tool_output:
+                        print(f"      No output in tool_result, skipping")
+                        continue
+
+                    # The output can be either:
+                    # 1. A dict with 'content' and 'metadata' keys
+                    # 2. A list (the content blocks directly)
+                    # 3. A ToolResponse object
+
+                    if isinstance(tool_output, Mapping):
+                        print(f"      Output is dict with keys: {list(tool_output.keys())}")
+                        tool_content = tool_output.get("content")
+                        tool_metadata = tool_output.get("metadata")
+                    elif isinstance(tool_output, list):
+                        print(f"      Output is list with {len(tool_output)} items")
+                        # Show what's in the list
+                        for i, item in enumerate(tool_output[:3]):  # First 3 items
+                            if isinstance(item, Mapping):
+                                print(f"        Item {i}: type={item.get('type')}, keys={list(item.keys())}")
+                            else:
+                                print(f"        Item {i}: {type(item).__name__}")
+
+                        # Output is the content blocks directly
+                        tool_content = tool_output
+                        # Metadata might be in the parent block
+                        tool_metadata = block.get("metadata")
+                        print(f"      Metadata from parent block: {type(tool_metadata).__name__ if tool_metadata else 'None'}")
+
+                        # Also check if there are other fields in the tool_result block
+                        print(f"      All block fields:")
+                        for key in block.keys():
+                            val = block[key]
+                            if isinstance(val, (str, int, bool)):
+                                print(f"        {key} = {val}")
+                            else:
+                                print(f"        {key} = {type(val).__name__}")
+                    else:
+                        # Might be a ToolResponse object
+                        tool_content = getattr(tool_output, "content", None)
+                        tool_metadata = getattr(tool_output, "metadata", None)
+                        print(f"      Output is {type(tool_output).__name__}, extracted content and metadata")
+
+                    # Extract from tool result metadata
+                    if isinstance(tool_metadata, Mapping):
+                        print(f"      Tool result has metadata with keys: {list(tool_metadata.keys())}")
+                        if tool_metadata.get("viz_type") or tool_metadata.get("image_data") or tool_metadata.get("images"):
+                            print(f"      Found viz data in tool result!")
+                            # Merge metadata
+                            for key in (
+                                "viz_type",
+                                "team_name",
+                                "opponent_name",
+                                "match_id",
+                                "competition_id",
+                                "season_id",
+                                "sample_size",
+                                "total_shots",
+                                "total_goals",
+                                "edge_count",
+                                "node_count",
+                            ):
+                                if key in tool_metadata and key not in merged_metadata:
+                                    merged_metadata[key] = tool_metadata[key]
+
+                            # Extract image_data
+                            image_data = tool_metadata.get("image_data")
+                            if isinstance(image_data, str) and image_data:
+                                mime = tool_metadata.get("image_mime_type") or "image/png"
+                                alt = tool_metadata.get("viz_type")
+                                _add_src(f"data:{mime};base64,{image_data}", mime=mime, alt=alt)
+                                print(f"        Added base64 image from metadata")
+
+                            # Extract image_path
+                            image_path = tool_metadata.get("image_path")
+                            if isinstance(image_path, str) and image_path:
+                                normalized_path = image_path.replace("\\", "/")
+                                alt = tool_metadata.get("viz_type")
+                                _add_src(f"/api/viz?path={normalized_path}", alt=alt, path=normalized_path)
+                                print(f"        Added path image: {normalized_path}")
+
+                            # Extract images array
+                            images_meta = tool_metadata.get("images")
+                            if isinstance(images_meta, list):
+                                merged_list = merged_metadata.setdefault("images", [])
+                                for img_meta in images_meta:
+                                    if not isinstance(img_meta, Mapping):
+                                        continue
+                                    merged_list.append(dict(img_meta))
+                                    data = img_meta.get("data")
+                                    mime = img_meta.get("mime_type") or tool_metadata.get("image_mime_type") or "image/png"
+                                    alt = img_meta.get("alt") or tool_metadata.get("viz_type")
+                                    path_val = img_meta.get("path")
+                                    if isinstance(data, str) and data:
+                                        _add_src(f"data:{mime};base64,{data}", mime=mime, alt=alt)
+                                        print(f"        Added base64 image from images array")
+                                    elif isinstance(path_val, str) and path_val:
+                                        normalized_path = path_val.replace("\\", "/")
+                                        _add_src(f"/api/viz?path={normalized_path}", alt=alt, path=normalized_path)
+                                        print(f"        Added path image from images array")
+
+                    # Extract from tool result content (list of blocks)
+                    if isinstance(tool_content, list):
+                        print(f"      Tool result has content list with {len(tool_content)} blocks")
+                        for content_block in tool_content:
+                            if isinstance(content_block, Mapping) and content_block.get("type") == "image":
+                                print(f"        Found image block in tool result content")
+                                source = content_block.get("source")
+                                alt = content_block.get("alt")
+                                if isinstance(source, Mapping):
+                                    source_type = source.get("type")
+                                    if source_type == "base64":
+                                        data = source.get("data")
+                                        mime = source.get("media_type") or "image/png"
+                                        if isinstance(data, str) and data:
+                                            _add_src(f"data:{mime};base64,{data}", mime=mime, alt=alt)
+                                            print(f"          Added base64 image from content block")
+                                    elif source_type == "url":
+                                        url = source.get("url")
+                                        mime = source.get("media_type")
+                                        if isinstance(url, str) and url:
+                                            _add_src(url, mime=mime, alt=alt)
+
+                # Also check regular image blocks (legacy path)
+                elif block.get("type") == "image":
+                    source = block.get("source")
+                    alt = block.get("alt")
+                    if not isinstance(source, Mapping):
+                        continue
+                    source_type = source.get("type")
+                    if source_type == "base64":
+                        data = source.get("data")
+                        mime = source.get("media_type") or "image/png"
+                        if isinstance(data, str) and data:
+                            _add_src(f"data:{mime};base64,{data}", mime=mime, alt=alt)
+                    elif source_type == "url":
+                        url = source.get("url")
+                        mime = source.get("media_type")
+                        if isinstance(url, str) and url:
+                            _add_src(url, mime=mime, alt=alt)
 
     return attachments, merged_metadata
 
@@ -600,6 +772,13 @@ async def agent_chat(request: ChatRequest) -> ChatResponse:
         )
         tool_attachments, tool_metadata = await _extract_tool_visualizations_from_memory(agent)
 
+        # DEBUG: Log extraction results
+        print(f"DEBUG: Extracted {len(tool_attachments)} tool attachments")
+        print(f"DEBUG: Tool metadata keys: {list(tool_metadata.keys())}")
+        if tool_attachments:
+            for i, att in enumerate(tool_attachments):
+                print(f"DEBUG: Attachment {i}: type={att.get('type')}, src={att.get('src', '')[:80]}...")
+
     reply_text = reply_msg.get_text_content() or ""
     msg_attachments = _attachments_from_msg(reply_msg)
     attachments = _merge_attachment_lists(msg_attachments, tool_attachments)
@@ -617,6 +796,10 @@ async def agent_chat(request: ChatRequest) -> ChatResponse:
                 existing.extend(incoming)
                 tool_metadata = {k: v for k, v in tool_metadata.items() if k != "images"}
         final_metadata.update(tool_metadata)
+
+    # DEBUG: Log final response
+    print(f"DEBUG: Returning {len(attachments) if attachments else 0} total attachments")
+    print(f"DEBUG: Final metadata has viz_type: {final_metadata.get('viz_type', 'NONE')}")
 
     return ChatResponse(
         session_id=session_id,
@@ -755,6 +938,61 @@ def reset_agent_session(session_id: str) -> Dict[str, str]:
     }
 
 
+@app.get("/api/viz")
+def serve_visualization(path: str = Query(..., min_length=1)) -> FileResponse:
+    """
+    Serve visualization images from the plots directory.
+
+    Security: Only serves files from the plots/ directory to prevent path traversal attacks.
+    """
+    # Normalize and validate path
+    requested_path = path.strip().replace("\\", "/")
+
+    # Remove leading slashes
+    while requested_path.startswith("/"):
+        requested_path = requested_path[1:]
+
+    # Resolve absolute path
+    plots_dir = Path(__file__).parent.parent.parent / "plots"
+    file_path = (plots_dir / requested_path).resolve()
+
+    # Security check: Ensure file is within plots directory
+    try:
+        file_path.relative_to(plots_dir.resolve())
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: Path outside plots directory"
+        )
+
+    # Check file exists
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Visualization not found: {path}"
+        )
+
+    # Determine content type
+    content_type = "image/png"
+    suffix = file_path.suffix.lower()
+    if suffix in (".jpg", ".jpeg"):
+        content_type = "image/jpeg"
+    elif suffix == ".svg":
+        content_type = "image/svg+xml"
+    elif suffix == ".gif":
+        content_type = "image/gif"
+    elif suffix == ".webp":
+        content_type = "image/webp"
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+        }
+    )
+
+
 @app.get("/")
 def index() -> Dict[str, Any]:
     return {
@@ -774,6 +1012,7 @@ def index() -> Dict[str, Any]:
             "/api/agent/compress/{session_id}",
             "/api/agent/chat",
             "/api/agent/chat/{session_id}",
+            "/api/viz",
         ],
     }
 async def _summarise_history_text(text: str, *, max_tokens: int = 512) -> str:
