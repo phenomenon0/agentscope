@@ -4,7 +4,7 @@ Facade helpers for fetching football data.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from ..cache import DataCache
 from ..config import APISettings
@@ -94,6 +94,29 @@ def fetch_wyscout_events(match_id: int) -> Dict[str, Any]:
     Retrieve Wyscout event data for a match.
     """
     return _wyscout_client().get_events(match_id)
+
+
+def get_wyscout_common_areas() -> List[Dict[str, Any]]:
+    """
+    Return the curated list of frequently used Wyscout areas.
+    """
+    return WyscoutClient.common_area_index()
+
+
+def resolve_wyscout_area(
+    identifier: Union[int, str, None], *, use_cache: bool = True
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolve an area identifier to metadata using the curated index and live data fallback.
+    """
+    if identifier is None:
+        return None
+
+    entry = WyscoutClient.resolve_common_area(identifier)
+    if entry is not None:
+        return entry
+
+    return _wyscout_client().resolve_area(identifier, use_cache=use_cache)
 
 
 def get_match_ids(

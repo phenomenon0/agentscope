@@ -22,6 +22,7 @@ from agentspace.services.statsbomb_tools import (
     get_team_season_summary,
     get_player_multi_season_summary,
     get_players_season_summary,
+    get_competition_players,
     POPULAR_COMPETITIONS,
 )
 
@@ -113,6 +114,257 @@ def test_list_matches_returns_empty_on_missing():
     with patch.object(tools, "get_statsbomb_client", return_value=DummyClient()):
         matches = tools.list_matches(1, 2)
         assert matches == []
+
+
+def test_list_matches_status_synonyms(monkeypatch):
+    class DummyClient:
+        def list_matches(self, *_args, **_kwargs):
+            return [
+                {
+                    "match_id": 1,
+                    "match_status": "available",
+                    "home_team": {"home_team_name": "Arsenal"},
+                    "away_team": {"away_team_name": "Manchester United"},
+                },
+                {
+                    "match_id": 2,
+                    "match_status": "scheduled",
+                    "home_team": {"home_team_name": "Manchester United"},
+                    "away_team": {"away_team_name": "Arsenal"},
+                },
+            ]
+
+    monkeypatch.setattr(tools, "get_statsbomb_client", lambda: DummyClient())
+
+    matches = tools.list_matches(
+        2,
+        317,
+        team_name="Arsenal",
+        opponent_name="Manchester United",
+        match_status=["played"],
+    )
+    assert [match["match_id"] for match in matches] == [1]
+
+
+def test_resolve_player_current_team(monkeypatch):
+    tools._player_index_cache.clear()
+    monkeypatch.setattr(
+        tools,
+        "_current_season_label",
+        lambda: "2024/2025",
+    )
+    monkeypatch.setattr(
+        tools,
+        "season_id_for_label",
+        lambda competition_id, season_label, use_cache=True: 317,
+    )
+
+    rows = [
+        {
+            "player_id": 1,
+            "player_name": "Bukayo Saka",
+            "team_name": "Arsenal",
+            "player_season_minutes": 2000,
+        },
+        {
+            "player_id": 2,
+            "player_name": "Bukayo Saka",
+            "team_name": "England",
+            "player_season_minutes": 300,
+        },
+    ]
+
+    monkeypatch.setattr(
+        tools,
+        "fetch_player_season_stats_data",
+        lambda *_, **__: rows,
+    )
+
+    best, candidates = tools.resolve_player_current_team(
+        "Bukayo Saka",
+        season_label="2024/2025",
+        competition_ids=[2],
+        use_index=False,
+    )
+
+    assert best is not None
+    assert best["team_name"] == "Arsenal"
+    assert len(candidates) == 2
+
+
+def test_resolve_player_current_team_respects_min_minutes(monkeypatch):
+    tools._player_index_cache.clear()
+    monkeypatch.setattr(
+        tools,
+        "_current_season_label",
+        lambda: "2024/2025",
+    )
+    monkeypatch.setattr(
+        tools,
+        "season_id_for_label",
+        lambda competition_id, season_label, use_cache=True: 317,
+    )
+
+    rows = [
+        {
+            "player_id": 1,
+            "player_name": "Rasmus Hojlund",
+            "team_name": "Manchester United",
+            "player_season_minutes": 1500,
+        },
+        {
+            "player_id": 2,
+            "player_name": "Rasmus Hojlund",
+            "team_name": "Atalanta",
+            "player_season_minutes": 100,
+        },
+    ]
+
+    monkeypatch.setattr(
+        tools,
+        "fetch_player_season_stats_data",
+        lambda *_, **__: rows,
+    )
+
+    best, candidates = tools.resolve_player_current_team(
+        "Rasmus Højlund",
+        competition_ids=[2],
+        min_minutes=200,
+        season_label="2024/2025",
+        use_index=False,
+    )
+
+    assert best["team_name"] == "Manchester United"
+    assert len(candidates) == 1
+
+
+def test_resolve_player_current_team_fallback_previous_season(monkeypatch):
+    tools._player_index_cache.clear()
+
+    monkeypatch.setattr(tools, "_current_season_label", lambda: "2025/2026")
+
+    def fake_season_id(comp_id, label, use_cache=True):
+        if label == "2025/2026":
+            return 400
+        if label == "2024/2025":
+            return 317
+        return None
+
+    monkeypatch.setattr(tools, "season_id_for_label", fake_season_id)
+
+    def fake_fetch(competition_id, season_id, **_):
+        if season_id == 400:
+            return []
+        return [
+            {
+                "player_id": 1,
+                "player_name": "Scott McTominay",
+                "team_name": "Manchester United",
+                "player_season_minutes": 1800,
+            }
+        ]
+
+    monkeypatch.setattr(tools, "fetch_player_season_stats_data", fake_fetch)
+
+    best, candidates = tools.resolve_player_current_team(
+        "Scott McTominay",
+        competition_ids=[2],
+        season_label="2025/2026",
+        use_index=False,
+    )
+
+    assert best["season_label"] == "2024/2025"
+    assert best["team_name"] == "Manchester United"
+
+
+def test_resolve_player_current_team_team_hint(monkeypatch):
+    tools._player_index_cache.clear()
+    monkeypatch.setattr(tools, "_current_season_label", lambda: "2024/2025")
+    monkeypatch.setattr(
+        tools,
+        "season_id_for_label",
+        lambda competition_id, season_label, use_cache=True: 317,
+    )
+
+    rows = [
+        {
+            "player_id": 1,
+            "player_name": "Scott McTominay",
+            "team_name": "Manchester United",
+            "player_season_minutes": 1500,
+        },
+        {
+            "player_id": 2,
+            "player_name": "Scott McTominay",
+            "team_name": "Scotland",
+            "player_season_minutes": 500,
+        },
+    ]
+
+    monkeypatch.setattr(tools, "fetch_player_season_stats_data", lambda *_, **__: rows)
+
+    best, candidates = tools.resolve_player_current_team(
+        "Scott McTominay",
+        competition_ids=[2],
+        team_name="Manchester United",
+        use_index=False,
+    )
+
+    assert best["team_name"] == "Manchester United"
+
+
+def test_get_player_season_summary_uses_resolver(monkeypatch):
+    monkeypatch.setattr(
+        tools,
+        "resolve_player_current_team",
+        lambda *_, **__: ({"competition_id": 2, "season_label": "2024/2025"}, []),
+    )
+
+    class DummyClient:
+        def get_player_season_stats(self, *_, **__):
+            return [
+                {
+                    "player_name": "Scott McTominay",
+                    "team_name": "Manchester United",
+                    "player_season_minutes": 1200,
+                }
+            ]
+
+    monkeypatch.setattr(tools, "get_statsbomb_client", lambda: DummyClient())
+    monkeypatch.setattr(
+        tools,
+        "season_id_for_label",
+        lambda competition_id, season_label, use_cache=True: 317,
+    )
+
+    summary = tools.get_player_season_summary(
+        player_name="Scott McTominay",
+        season_label="2025/2026",
+        competition_name=None,
+        competition_id=None,
+    )
+
+    assert summary["team_name"] == "Manchester United"
+
+
+def test_fetch_player_season_stats_handles_404(monkeypatch):
+    class DummyClient:
+        def get_player_season_stats(self, *_, **__):
+            raise tools.APINotFoundError("missing")
+
+    monkeypatch.setattr(tools, "get_statsbomb_client", lambda: DummyClient())
+    rows = tools.fetch_player_season_stats_data(9, 999)
+    assert rows == []
+
+
+def test_fetch_team_season_stats_handles_404(monkeypatch):
+    class DummyClient:
+        def get_team_season_stats(self, *_, **__):
+            raise tools.APINotFoundError("missing")
+
+    monkeypatch.setattr(tools, "get_statsbomb_client", lambda: DummyClient())
+    rows = tools.fetch_team_season_stats_data(9, 999)
+    assert rows == []
 
 
 def test_fetch_match_dataset_combines_components(monkeypatch):
@@ -295,8 +547,22 @@ def test_fetch_player_match_stats_data_filters(monkeypatch):
 
 
 def test_resolve_competition_id_alias():
-    premier_id = resolve_competition_id("Premier League")
-    assert premier_id == 2
+    assert resolve_competition_id("Premier League") == 2
+    assert resolve_competition_id("Bundesliga") == 9
+    assert resolve_competition_id("Serie A") == 12
+    assert resolve_competition_id("Ligue 1") == 7
+    assert resolve_competition_id("Eredivisie") == 6
+    assert resolve_competition_id("Jupiler Pro League") == 46
+    assert resolve_competition_id("Primeira Liga") == 13
+    assert resolve_competition_id("Major League Soccer") == 37
+    assert resolve_competition_id("UEFA Champions League") == 16
+    assert resolve_competition_id("UEFA Europa League") == 35
+    assert resolve_competition_id("UEFA Europa Conference League") == 353
+    assert resolve_competition_id("FA Cup") == 69
+    assert resolve_competition_id("Copa del Rey") == 87
+    assert resolve_competition_id("Coppa Italia") == 66
+    assert resolve_competition_id("Coupe de France") == 86
+    assert resolve_competition_id("DFB Pokal") == 165
     assert resolve_competition_id("Unknown League") is None
 
 
@@ -393,6 +659,82 @@ def test_fetch_player_season_stats_data_handles_diacritics(monkeypatch):
     )
 
     assert rows_partial and rows_partial[0]["player_name"] == "Martin Ødegaard"
+
+
+def test_get_competition_players_returns_team_roster(monkeypatch):
+    monkeypatch.setattr(
+        tools,
+        "season_id_for_label",
+        lambda competition_id, season_label, use_cache=True: 317,
+    )
+
+    class DummyClient:
+        def get_player_season_stats(self, *_, **__):
+            return [
+                {
+                    "player_id": 1,
+                    "player_name": "Bukayo Saka",
+                    "team_name": "Arsenal",
+                    "position": "FW",
+                    "player_season_minutes": 900,
+                    "player_season_goals": 10,
+                },
+                {
+                    "player_id": 2,
+                    "player_name": "Declan Rice",
+                    "team_name": "Arsenal",
+                    "position": "MF",
+                    "player_season_minutes": 1100,
+                    "player_season_goals": 5,
+                },
+            ]
+
+    monkeypatch.setattr(tools, "get_statsbomb_client", lambda: DummyClient())
+
+    rows = get_competition_players(
+        competition_id=2,
+        season_label="2024/2025",
+        team_name="Arsenal",
+        sort_by="player_season_goals",
+        descending=True,
+    )
+
+    assert len(rows) == 2
+    assert rows[0]["player_name"] == "Bukayo Saka"
+
+
+def test_get_competition_players_preserves_identifiers_with_metrics(monkeypatch):
+    monkeypatch.setattr(
+        tools,
+        "season_id_for_label",
+        lambda competition_id, season_label, use_cache=True: 317,
+    )
+
+    class DummyClient:
+        def get_player_season_stats(self, *_, **__):
+            return [
+                {
+                    "player_id": 1,
+                    "player_name": "Bukayo Saka",
+                    "team_name": "Arsenal",
+                    "position": "FW",
+                    "player_season_minutes": 900,
+                    "player_season_goals": 10,
+                    "player_season_assists": 7,
+                }
+            ]
+
+    monkeypatch.setattr(tools, "get_statsbomb_client", lambda: DummyClient())
+
+    rows = get_competition_players(
+        competition_id=2,
+        season_label="2024/2025",
+        metrics=["player_season_goals"],
+    )
+
+    assert rows[0]["player_name"] == "Bukayo Saka"
+    assert rows[0]["team_name"] == "Arsenal"
+    assert rows[0]["player_season_goals"] == 10
 
 
 def test_get_team_season_summary(monkeypatch):

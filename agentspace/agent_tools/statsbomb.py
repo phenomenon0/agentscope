@@ -2,12 +2,20 @@
 Agentscope toolkit integration for StatsBomb data helpers.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+import json
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from agentscope.message import TextBlock
 from agentscope.tool import Toolkit, ToolResponse
 import agentscope
 
+from ..analytics import (
+    DEFAULT_LEADERBOARD_GROUPS,
+    build_player_leaderboards,
+    events_to_dataframe,
+    summarise_player_events,
+    summarise_team_events,
+)
 from ..services.statsbomb_tools import (
     EventFilters,
     MatchDataset,
@@ -23,10 +31,13 @@ from ..services.statsbomb_tools import (
     get_player_multi_season_summary,
     get_player_season_summary,
     get_players_season_summary,
+    get_competition_players,
+    resolve_player_current_team,
     get_team_season_summary,
     list_competitions,
     list_seasons,
     _canonical,
+    _augment_player_record,
     resolve_competition_id,
     season_id_for_label,
 )
@@ -80,6 +91,275 @@ PLAYER_MATCH_DEFAULT_FIELDS = [
     "player_match_xg",
     "player_match_assists",
 ]
+
+PLAYER_LIST_DEFAULT_FIELDS = [
+    "player_id",
+    "player_name",
+    "team_name",
+    "position",
+    "player_season_minutes",
+    "player_season_goals",
+    "player_season_assists",
+]
+
+
+def _placeholder(value: Optional[str], default: str) -> str:
+    return value if value else default
+
+
+def player_scouting_report_template(
+    player_name: Optional[str] = None,
+    specific_role: Optional[str] = None,
+    club_name: Optional[str] = None,
+    age: Optional[str] = None,
+    height: Optional[str] = None,
+    weight: Optional[str] = None,
+    preferred_foot: Optional[str] = None,
+    contract: Optional[str] = None,
+    market_value: Optional[str] = None,
+    matches: Optional[int] = None,
+    minutes: Optional[int] = None,
+    season_timeframe: Optional[str] = None,
+    utilization: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build a JSON-ready scouting report template with optional pre-filled fields.
+    """
+
+    player = _placeholder(player_name, "[PLAYER_NAME]")
+    role = _placeholder(specific_role, "[SPECIFIC_ROLE]")
+    club = _placeholder(club_name, "[CLUB_NAME]")
+    age_val = _placeholder(age, "[AGE]")
+    height_val = _placeholder(height, "[HEIGHT]")
+    weight_val = _placeholder(weight, "[WEIGHT]")
+    foot = _placeholder(preferred_foot, "[PREFERRED_FOOT]")
+    contract_val = _placeholder(contract, "[CONTRACT_DETAILS]")
+    market_val = _placeholder(market_value, "[MARKET_VALUE_RANGE]")
+    match_count = matches if matches is not None else "[NUMBER_OF_MATCHES]"
+    minute_count = minutes if minutes is not None else "[MINUTES_PLAYED]"
+    season = _placeholder(season_timeframe, "[SEASON_TIMEFRAME]")
+    usage = _placeholder(utilization, "[UTILIZATION]")
+
+    template: Dict[str, Any] = {
+        "report_title": f"SCOUTING REPORT: {player}",
+        "executive_summary": {
+            "player": player,
+            "position": role,
+            "club": club,
+            "age": age_val,
+            "player_archetype": "[AI_GENERATED_ARCHETYPE]",
+            "primary_strengths": [
+                "[AI_GENERATED_SUMMARY_STRENGTH_1]",
+                "[AI_GENERATED_SUMMARY_STRENGTH_2]",
+            ],
+            "key_development_area": "[AI_GENERATED_SUMMARY_DEVELOPMENT_AREA]",
+            "recommendation": "[AI_GENERATED_RECOMMENDATION]",
+            "player_comparison": "[AI_GENERATED_PLAYER_COMPARISON]",
+        },
+        "player_overview_and_vitals": {
+            "height": height_val,
+            "weight": weight_val,
+            "preferred_foot": foot,
+            "contract_status": contract_val,
+            "market_value_estimate": market_val,
+            "analysis_sample": {
+                "matches": match_count,
+                "minutes": minute_count,
+                "season_timeframe": season,
+                "utilization": usage,
+            },
+        },
+        "key_skill_analysis": [
+            {
+                "module_title": "Module 1: [SKILL_CATEGORY_1]",
+                "analysis": "[AI_GENERATED_ANALYSIS_OF_SKILL_1]",
+                "summary": "[AI_GENERATED_SUMMARY_OF_SKILL_1]",
+                "metrics_table": {
+                    "columns": ["Metric", "Value", "Percentile", "Context"],
+                    "rows": [
+                        {
+                            "metric": "Tackles",
+                            "value": "[TACKLES]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "Interceptions",
+                            "value": "[INTERCEPTS]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "Aerial Win %",
+                            "value": "[AERIAL_%]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "Blocks",
+                            "value": "[BLOCKS]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                    ],
+                },
+            },
+            {
+                "module_title": "Module 2: [SKILL_CATEGORY_2]",
+                "analysis": "[AI_GENERATED_ANALYSIS_OF_SKILL_2]",
+                "summary": "[AI_GENERATED_SUMMARY_OF_SKILL_2]",
+                "metrics_table": {
+                    "columns": ["Metric", "Value", "Percentile", "Context"],
+                    "rows": [
+                        {
+                            "metric": "Pass Completion %",
+                            "value": "[PASS_%]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "Progressive Passes",
+                            "value": "[PROG_PASS]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "Long Ball Acc %",
+                            "value": "[LONG_BALL%]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "xG Build Up",
+                            "value": "[XG_BUILD]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                    ],
+                },
+            },
+            {
+                "module_title": "Module 3: [SKILL_CATEGORY_3]",
+                "analysis": "[AI_GENERATED_ANALYSIS_OF_SKILL_3]",
+                "summary": "[AI_GENERATED_SUMMARY_OF_SKILL_3]",
+                "metrics_table": {
+                    "columns": ["Metric", "Value", "Percentile", "Context"],
+                    "rows": [],
+                },
+            },
+            {
+                "module_title": "Module 4: [SKILL_CATEGORY_4]",
+                "analysis": "[AI_GENERATED_ANALYSIS_OF_SKILL_4]",
+                "summary": "[AI_GENERATED_SUMMARY_OF_SKILL_4]",
+                "metrics_table": {
+                    "columns": ["Metric", "Value", "Percentile", "Context"],
+                    "rows": [],
+                },
+            },
+            {
+                "module_title": "Module 5: [PHYSICAL_METRICS]",
+                "analysis": "[AI_GENERATED_ANALYSIS_OF_PHYSICAL_METRICS]",
+                "summary": "[AI_GENERATED_SUMMARY_OF_PHYSICAL_METRICS]",
+                "metrics_table": {
+                    "columns": ["Metric", "Value", "Percentile", "Context"],
+                    "rows": [
+                        {
+                            "metric": "Accelerations",
+                            "value": "[ACCELERATIONS]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                        {
+                            "metric": "Top Speed",
+                            "value": "[TOP_SPEED]",
+                            "percentile": "[P_RANK]%",
+                            "context": "[CONTEXT]",
+                        },
+                    ],
+                },
+            },
+        ],
+        "scouts_eye": {
+            "notes": "[USER_ENTERED_NOTES_HERE]",
+            "match_vs_opponent": "[MATCH_VS_OPPONENT]",
+            "date": "[DATE]",
+        },
+        "tactical_fit_and_system_compatibility": {
+            "preferred_system": "[AI_ANALYSIS_ON_SYSTEM]",
+            "role_within_system": "[AI_ANALYSIS_ON_ROLE]",
+            "synergies": "[AI_ANALYSIS_ON_SYNERGIES]",
+        },
+        "final_assessment": {
+            "strengths": [
+                {
+                    "title": "[STRENGTH_1]",
+                    "analysis": "[AI_GENERATED_ELABORATION_1]",
+                },
+                {
+                    "title": "[STRENGTH_2]",
+                    "analysis": "[AI_GENERATED_ELABORATION_2]",
+                },
+                {
+                    "title": "[STRENGTH_3]",
+                    "analysis": "[AI_GENERATED_ELABORATION_3]",
+                },
+            ],
+            "development_areas": [
+                {
+                    "title": "[DEVELOPMENT_AREA_1]",
+                    "analysis": "[AI_GENERATED_DEVELOPMENT_DETAIL_1]",
+                },
+                {
+                    "title": "[DEVELOPMENT_AREA_2]",
+                    "analysis": "[AI_GENERATED_DEVELOPMENT_DETAIL_2]",
+                },
+            ],
+            "overall_conclusion": "[AI_GENERATED_OVERALL_CONCLUSION]",
+        },
+    }
+
+    return template
+
+
+def _df_records(df: Any) -> List[Dict[str, Any]]:
+    try:
+        import pandas as pd  # type: ignore
+    except ImportError:  # pragma: no cover - pandas is an explicit dependency
+        return []
+    if isinstance(df, pd.DataFrame):
+        if df.empty:
+            return []
+        return df.to_dict(orient="records")
+    return []
+
+
+def _summarise_leaderboards(
+    leaderboards: Dict[str, Dict[str, "pd.DataFrame"]],
+    *,
+    max_categories: int = 3,
+) -> List[str]:
+    try:
+        import pandas as pd  # type: ignore
+    except ImportError:  # pragma: no cover
+        return []
+
+    lines: List[str] = []
+    for idx, (category, tables) in enumerate(leaderboards.items()):
+        if idx >= max_categories:
+            break
+        if not tables:
+            continue
+        metric, table = next(iter(tables.items()))
+        if isinstance(table, pd.DataFrame) and not table.empty:
+            row = table.iloc[0]
+            value = row.get(metric)
+            formatted_value = f"{value:.2f}" if isinstance(value, float) else value
+            lines.append(
+                f"{category.replace('_', ' ').title()} – {metric.replace('_', ' ')}: "
+                f"{row.get('player_name', 'Unknown')} ({row.get('team', 'Unknown')}, {formatted_value})"
+            )
+    return lines
+
 
 PLAYER_MATCH_SUMMARY_MAP = [
     ("player_match_minutes", "Minutes"),
@@ -185,6 +465,26 @@ def register_statsbomb_tools(
         func_description="Retrieve player season aggregates with optional sorting and filtering.",
     )
     toolkit.register_tool_function(
+        list_competition_players_tool,
+        group_name=group_name,
+        func_description="List player season records for a competition, optionally filtered to a team.",
+    )
+    toolkit.register_tool_function(
+        list_team_players_tool,
+        group_name=group_name,
+        func_description="List the current squad for a team in a given competition season.",
+    )
+    toolkit.register_tool_function(
+        resolve_player_current_team_tool,
+        group_name=group_name,
+        func_description="Resolve the current team assignment for a player across major competitions.",
+    )
+    toolkit.register_tool_function(
+        summarise_match_performance,
+        group_name=group_name,
+        func_description="Summarise player and team performance for a single match.",
+    )
+    toolkit.register_tool_function(
         fetch_team_season_aggregates,
         group_name=group_name,
         func_description="Retrieve team season aggregates with optional sorting.",
@@ -213,6 +513,11 @@ def register_statsbomb_tools(
         compare_player_season_summaries_tool,
         group_name=group_name,
         func_description="Compare multiple players in the same competition season.",
+    )
+    toolkit.register_tool_function(
+        player_report_template_tool,
+        group_name=group_name,
+        func_description="Generate a JSON scouting report template with configurable placeholders.",
     )
     return toolkit
 
@@ -264,6 +569,8 @@ def list_competitions_tool(
 ) -> ToolResponse:
     """List StatsBomb competitions."""
 
+    known_lines: List[str] = []
+    known_metadata: Dict[str, Any] = {}
     if name:
         resolved = resolve_competition_id(name)
         if resolved is not None and not country and not only_with_data:
@@ -278,17 +585,17 @@ def list_competitions_tool(
                     fields=["season_label", "season_id"],
                     limit=len(season_rows),
                 )
-                lines = [
+                known_lines = [
                     f"Known competition: {entry.get('name', name)} (competition_id={resolved}).",
                     "Known season ids:",
                     preview or "- Season IDs not cached; call list_seasons_tool if needed.",
+                    "",
                 ]
-                metadata = {
+                known_metadata = {
                     "competition_id": resolved,
                     "aliases": entry.get("aliases", []),
                     "season_ids": entry.get("season_ids", {}),
                 }
-                return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
 
     competitions = list_competitions(
         name=name,
@@ -304,13 +611,14 @@ def list_competitions_tool(
         preview_rows,
         fields=["competition_id", "competition_name", "season_id", "season_name", "match_available"],
     )
-    lines = [
+    lines = known_lines + [
         f"Found {len(competitions)} competition(s).",
         "Sample (competition_id, competition_name, season_id, season_name, match_available):",
         preview or "- None",
         "Full results available in metadata['competitions'].",
     ]
     metadata = {"competitions": competitions}
+    metadata.update(known_metadata)
     return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
 
 
@@ -531,10 +839,13 @@ def fetch_match_events(
     opponent_name: Optional[str] = None,
     event_types: Optional[List[str]] = None,
     player_names: Optional[List[str]] = None,
+    possession_team_names: Optional[List[str]] = None,
     periods: Optional[List[int]] = None,
     minute_range: Optional[List[int]] = None,
     time_range: Optional[List[float]] = None,
     score_states: Optional[List[str]] = None,
+    play_patterns: Optional[List[str]] = None,
+    outcome_names: Optional[List[str]] = None,
     zone: Optional[str] = None,
     location_key: str = "start",
     include_lineups: bool = False,
@@ -553,10 +864,13 @@ def fetch_match_events(
         opponent_name: Optional opponent filter.
         event_types: Optional list of event type names.
         player_names: Optional list of player names.
+        possession_team_names: Optional list of possession team names.
         periods: Optional list of period numbers.
         minute_range: Two-element (inclusive) minute range filter.
         time_range: Two-element (inclusive) elapsed-seconds range filter.
         score_states: Optional list of score state labels.
+        play_patterns: Optional list of play pattern labels.
+        outcome_names: Optional list of outcome labels.
         zone: Optional pitch zone filter.
         location_key: Location attribute considered when applying ``zone``.
         include_lineups: Whether to include the lineup payload.
@@ -573,10 +887,13 @@ def fetch_match_events(
         team_names=[team_name] if team_name else None,
         opponent_names=[opponent_name] if opponent_name else None,
         player_names=list(player_names) if player_names else None,
+        possession_team_names=list(possession_team_names) if possession_team_names else None,
         periods=list(periods) if periods else None,
         minute_range=_normalize_range(minute_range),
         time_range=_normalize_range(time_range),
         score_states=list(score_states) if score_states else None,
+        play_patterns=list(play_patterns) if play_patterns else None,
+        outcome_names=list(outcome_names) if outcome_names else None,
         zone=zone,
         location_key=location_key,
     )
@@ -748,11 +1065,209 @@ def fetch_player_match_aggregates(
     return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
 
 
+def list_team_players_tool(
+    team_name: str,
+    season_label: str,
+    *,
+    competition: str = "Serie A",
+    competition_id: Optional[int] = None,
+    min_minutes: float = 0.0,
+    sort_by: Optional[str] = None,
+    descending: bool = True,
+    top_n: Optional[int] = None,
+    metrics: Optional[List[str]] = None,
+    use_cache: bool = True,
+) -> ToolResponse:
+    """List players for a specific team in a competition season."""
+
+    resolved_competition = competition_id or resolve_competition_id(competition)
+    if resolved_competition is None:
+        return _error_response(
+            f"Competition '{competition}' could not be resolved.",
+            {"competition": competition, "season_label": season_label, "team_name": team_name},
+        )
+
+    season_id = season_id_for_label(resolved_competition, season_label, use_cache=use_cache)
+    if season_id is None:
+        return _error_response(
+            f"Season '{season_label}' not found for competition {resolved_competition}.",
+            {"competition_id": resolved_competition, "season_label": season_label, "team_name": team_name},
+        )
+
+    players = get_competition_players(
+        competition_id=resolved_competition,
+        season_id=season_id,
+        season_label=season_label,
+        team_name=team_name,
+        min_minutes=min_minutes,
+        sort_by=sort_by,
+        descending=descending,
+        top_n=top_n,
+        metrics=metrics,
+        use_cache=use_cache,
+    )
+
+    metadata = {
+        "competition_id": resolved_competition,
+        "season_id": season_id,
+        "season_label": season_label,
+        "team_name": team_name,
+        "players": players,
+    }
+
+    preview_fields = metrics or PLAYER_LIST_DEFAULT_FIELDS
+    preview = _format_rows(players, fields=preview_fields, limit=min(len(players), 10))
+    lines = [
+        f"Found {len(players)} player(s) for {team_name} in {season_label}.",
+        "Sample (player_id, player_name, team, position, minutes, goals, assists):",
+        preview or "- None",
+        "Full roster available in metadata['players'].",
+    ]
+    return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
+
+
+def list_competition_players_tool(
+    season_label: str,
+    *,
+    competition: str = "Serie A",
+    competition_id: Optional[int] = None,
+    team_name: Optional[str] = None,
+    min_minutes: float = 0.0,
+    sort_by: Optional[str] = None,
+    descending: bool = True,
+    top_n: Optional[int] = None,
+    metrics: Optional[List[str]] = None,
+    use_cache: bool = True,
+) -> ToolResponse:
+    """List players across a competition season, optionally filtered to a team."""
+
+    resolved_competition = competition_id or resolve_competition_id(competition)
+    if resolved_competition is None:
+        return _error_response(
+            f"Competition '{competition}' could not be resolved.",
+            {"competition": competition, "season_label": season_label, "team_name": team_name},
+        )
+
+    season_id = season_id_for_label(resolved_competition, season_label, use_cache=use_cache)
+    if season_id is None:
+        return _error_response(
+            f"Season '{season_label}' not found for competition {resolved_competition}.",
+            {"competition_id": resolved_competition, "season_label": season_label, "team_name": team_name},
+        )
+
+    players = get_competition_players(
+        competition_id=resolved_competition,
+        season_id=season_id,
+        season_label=season_label,
+        team_name=team_name,
+        min_minutes=min_minutes,
+        sort_by=sort_by,
+        descending=descending,
+        top_n=top_n,
+        metrics=metrics,
+        use_cache=use_cache,
+    )
+
+    metadata = {
+        "competition_id": resolved_competition,
+        "season_id": season_id,
+        "season_label": season_label,
+        "team_name": team_name,
+        "players": players,
+    }
+
+    preview_fields = metrics or PLAYER_LIST_DEFAULT_FIELDS
+    preview = _format_rows(players, fields=preview_fields, limit=min(len(players), 10))
+    qualifier = f" for {team_name}" if team_name else ""
+    lines = [
+        f"Found {len(players)} player(s){qualifier} in competition {resolved_competition} season {season_label}.",
+        "Sample (player_id, player_name, team, position, minutes, goals, assists):",
+        preview or "- None",
+        "Full dataset available in metadata['players'].",
+    ]
+    return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
+
+
+def resolve_player_current_team_tool(
+    player_name: str,
+    *,
+    season_label: Optional[str] = None,
+    competition_ids: Optional[List[int]] = None,
+    competitions: Optional[List[str]] = None,
+    team_name: Optional[str] = None,
+    min_minutes: float = 0.0,
+    use_cache: bool = True,
+) -> ToolResponse:
+    """Resolve the current team for a player across configured competitions."""
+
+    try:
+        best, candidates = resolve_player_current_team(
+            player_name,
+            season_label=season_label,
+            competition_ids=competition_ids,
+            competition_names=competitions,
+            team_name=team_name,
+            min_minutes=min_minutes,
+            use_cache=use_cache,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        return _error_response(
+            f"Resolver error: {exc}",
+            {
+                "player": player_name,
+                "season_label": season_label,
+                "competition_ids": competition_ids,
+                "competitions": competitions,
+            },
+        )
+    if not best:
+        return _error_response(
+            f"No player matching '{player_name}' found in the requested competitions.",
+            {
+                "player": player_name,
+                "season_label": season_label,
+                "competition_ids": competition_ids,
+                "competitions": competitions,
+            },
+        )
+
+    lines = [
+        f"Player: {best.get('player_name')} ({best.get('player_id')})",
+        f"Team: {best.get('team_name')} in competition {best.get('competition_id')} season {best.get('season_label')}",
+    ]
+    minutes = best.get("player_season_minutes")
+    if minutes:
+        lines.append(f"Minutes played: {minutes:.0f}")
+    competition_name = next(
+        (item.get("competition_name") for item in POPULAR_COMPETITIONS if item["competition_id"] == best.get("competition_id")),
+        None,
+    )
+    if competition_name:
+        lines.append(f"Competition name: {competition_name}")
+
+    if len(candidates) > 1:
+        lines.append("Other matches:")
+        for alt in candidates[1:4]:
+            alt_minutes = alt.get("player_season_minutes")
+            minutes_text = f"{alt_minutes:.0f} mins" if alt_minutes else "n/a"
+            lines.append(
+                f"- {alt.get('team_name')} (competition {alt.get('competition_id')} season {alt.get('season_label')}, {minutes_text})"
+            )
+
+    metadata = {
+        "player": player_name,
+        "season_label": season_label,
+        "best_match": best,
+        "candidates": candidates,
+    }
+    return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
+
+
 def player_season_summary_tool(
     player_name: str,
     season_label: str,
     *,
-    competition: str = "Premier League",
+    competition: str = "Serie A",
     competition_id: Optional[int] = None,
     team_name: Optional[str] = None,
     metrics: Optional[List[str]] = None,
@@ -761,6 +1276,7 @@ def player_season_summary_tool(
 ) -> ToolResponse:
     """Quick helper returning a player's season summary."""
 
+    resolver_metadata: Dict[str, Any] = {}
     resolved_competition_id = competition_id or resolve_competition_id(competition)
     if resolved_competition_id is None:
         return _error_response(
@@ -768,52 +1284,101 @@ def player_season_summary_tool(
             {"competition": competition, "season_label": season_label},
         )
 
-    try:
-        summary = get_player_season_summary(
+    def _fetch_summary(comp_id: int, season: str) -> Dict[str, Any]:
+        return get_player_season_summary(
             player_name=player_name,
-            season_label=season_label,
-            competition_id=resolved_competition_id,
+            season_label=season,
+            competition_id=comp_id,
             metrics=metrics,
             min_minutes=min_minutes,
             use_cache=use_cache,
         )
-    except ValueError as exc:
-        return _error_response(
-            f"No data found for {player_name} in {competition} {season_label}. Detail: {exc}",
-            {
-                "player": player_name,
-                "competition_id": resolved_competition_id,
-                "season_label": season_label,
-                "error": str(exc),
-            },
+
+    def _resolve_and_fetch() -> Optional[Dict[str, Any]]:
+        nonlocal resolver_metadata
+        best, candidates = resolve_player_current_team(
+            player_name,
+            season_label=season_label,
+            competition_ids=[resolved_competition_id] if competition_id else None,
+            competition_names=[competition] if competition and competition_id is None else None,
+            team_name=team_name,
+            min_minutes=min_minutes,
+            use_cache=use_cache,
+        )
+        if not best:
+            return None
+        resolver_metadata = {"best_match": best, "candidates": candidates}
+        comp_id = int(best.get("competition_id", resolved_competition_id))
+        season = best.get("season_label") or season_label
+        resolved_name = best.get("player_name") or player_name
+        return get_player_season_summary(
+            player_name=resolved_name,
+            season_label=season,
+            competition_id=comp_id,
+            metrics=metrics,
+            min_minutes=min_minutes,
+            use_cache=use_cache,
         )
 
+    target_name = _canonical(player_name)
+    try:
+        summary = _fetch_summary(resolved_competition_id, season_label)
+    except ValueError as exc:
+        summary = _resolve_and_fetch()
+        if summary is None:
+            return _error_response(
+                f"No data found for {player_name} in {competition} {season_label}. Detail: {exc}",
+                {
+                    "player": player_name,
+                    "competition_id": resolved_competition_id,
+                    "season_label": season_label,
+                    "error": str(exc),
+                },
+            )
+
+    def _maybe_resolve() -> Optional[Dict[str, Any]]:
+        resolved = _resolve_and_fetch()
+        return resolved
+
+    if _canonical(summary.get("player_name", "")) != target_name:
+        resolved_summary = _maybe_resolve()
+        if resolved_summary is not None:
+            summary = resolved_summary
+
     if team_name and _canonical(summary.get("team_name", "")) != _canonical(team_name):
-        return _error_response(
-            f"Player {player_name} belongs to {summary.get('team_name')}, not {team_name}.",
-            {
-                "player": player_name,
-                "team": summary.get("team_name"),
-                "expected_team": team_name,
-                "competition_id": resolved_competition_id,
-                "season_label": season_label,
-            },
-        )
+        fallback_summary = _resolve_and_fetch()
+        if fallback_summary is None or _canonical(fallback_summary.get("team_name", "")) != _canonical(team_name):
+            return _error_response(
+                f"Player {player_name} belongs to {summary.get('team_name')}, not {team_name}.",
+                {
+                    "player": player_name,
+                    "team": summary.get("team_name"),
+                    "expected_team": team_name,
+                    "competition_id": resolved_competition_id,
+                    "season_label": season_label,
+                },
+            )
+        summary = fallback_summary
+
+    summary = _augment_player_record(dict(summary), metrics)
 
     display_fields = metrics or sorted(summary.keys())
     preview = _format_rows([summary], fields=display_fields, limit=1)
     summary_lines = _summarise_metrics(summary, PLAYER_SEASON_SUMMARY_MAP)
+    summary_season = summary.get("season_name") or season_label
     text = (
-        f"Season summary for {summary.get('player_name')} in {season_label}"
+        f"Season summary for {summary.get('player_name')} in {summary_season}"
         f" ({summary.get('team_name')}).\nKey metrics:\n{summary_lines or '- N/A'}\n"
         f"Raw fields:\n{preview}"
     )
+    final_competition_id = summary.get("competition_id", resolved_competition_id)
     metadata = {
         "player": summary.get("player_name"),
         "team": summary.get("team_name"),
-        "competition_id": resolved_competition_id,
-        "season_label": season_label,
+        "competition_id": final_competition_id,
+        "season_label": summary_season,
         "record": summary,
+        "resolver": resolver_metadata or None,
     }
     return ToolResponse(content=[TextBlock(type="text", text=text)], metadata=metadata)
 
@@ -822,7 +1387,7 @@ def team_season_summary_tool(
     team_name: str,
     season_label: str,
     *,
-    competition: str = "Premier League",
+    competition: str = "Serie A",
     competition_id: Optional[int] = None,
     metrics: Optional[List[str]] = None,
     use_cache: bool = True,
@@ -871,11 +1436,131 @@ def team_season_summary_tool(
     return ToolResponse(content=[TextBlock(type="text", text=text)], metadata=metadata)
 
 
+def summarise_match_performance(
+    match_id: int,
+    *,
+    competition_id: int,
+    season_id: int,
+    top_n: int = 5,
+    leaderboard_groups: Optional[Dict[str, Sequence[str]]] = None,
+    include_leaderboards: bool = True,
+    include_team_summary: bool = True,
+    use_cache: bool = True,
+) -> ToolResponse:
+    """
+    Provide a compact summary of player and team performance for a match.
+    """
+
+    descriptor = MatchDescriptor(match_id=match_id, competition_id=competition_id, season_id=season_id)
+    dataset = fetch_match_dataset(
+        descriptor,
+        include_lineups=False,
+        include_frames=False,
+        use_cache=use_cache,
+    )
+    events_df = events_to_dataframe(dataset)
+    player_summary = summarise_player_events(events_df)
+    team_summary = summarise_team_events(events_df) if include_team_summary else None
+    leaderboards = (
+        build_player_leaderboards(
+            player_summary,
+            groups=leaderboard_groups or DEFAULT_LEADERBOARD_GROUPS,
+            top_n=top_n,
+        )
+        if include_leaderboards
+        else {}
+    )
+
+    match = dataset.match or {}
+    home = match.get("home_team", {}).get("home_team_name")
+    away = match.get("away_team", {}).get("away_team_name")
+    match_date = match.get("match_date")
+
+    lines = [
+        f"Match {match_id}: {home} vs {away}" if home or away else f"Match {match_id}",
+        f"Date: {match_date}" if match_date else "",
+        f"Events analysed: {len(events_df)}",
+    ]
+    lines = [line for line in lines if line]
+
+    if not player_summary.empty:
+        top_scorers = (
+            player_summary.sort_values("goals", ascending=False)
+            .head(min(top_n, len(player_summary)))
+        )
+        if top_scorers["goals"].sum() > 0:
+            scorer_line = ", ".join(
+                f"{row.player_name} ({row.team}, {int(row.goals)} goals)"
+                for _, row in top_scorers.iterrows()
+                if row.goals
+            )
+            if scorer_line:
+                lines.append(f"Top scorers: {scorer_line}")
+
+        top_xg = (
+            player_summary.sort_values("xg", ascending=False)
+            .head(min(top_n, len(player_summary)))
+        )
+        if top_xg["xg"].sum() > 0:
+            xg_line = ", ".join(
+                f"{row.player_name} ({row.team}, {row.xg:.2f} xG)"
+                for _, row in top_xg.iterrows()
+                if row.xg
+            )
+            if xg_line:
+                lines.append(f"xG leaders: {xg_line}")
+
+        progressive = (
+            player_summary.sort_values("progressive_actions", ascending=False)
+            .head(min(top_n, len(player_summary)))
+        )
+        if progressive["progressive_actions"].sum() > 0:
+            prog_line = ", ".join(
+                f"{row.player_name} ({row.team}, {int(row.progressive_actions)} progressive actions)"
+                for _, row in progressive.iterrows()
+                if row.progressive_actions
+            )
+            if prog_line:
+                lines.append(f"Progression: {prog_line}")
+
+    if include_team_summary and team_summary is not None and not team_summary.empty:
+        for _, row in team_summary.iterrows():
+            goals = int(row.get("goals", 0))
+            xg = row.get("xg", 0.0)
+            passes_completed = int(row.get("passes_completed", 0))
+            line = f"{row.get('team')}: Goals {goals}"
+            if xg:
+                line += f", xG {xg:.2f}"
+            if passes_completed:
+                line += f", Passes Completed {passes_completed}"
+            lines.append(line)
+
+    if leaderboards:
+        summary_lines = _summarise_leaderboards(leaderboards)
+        if summary_lines:
+            lines.append("Leaderboard highlights:")
+            lines.extend(f"- {line}" for line in summary_lines)
+
+    metadata = {
+        "match_id": match_id,
+        "competition_id": competition_id,
+        "season_id": season_id,
+        "match": match,
+        "player_summary": _df_records(player_summary),
+        "team_summary": _df_records(team_summary) if team_summary is not None else [],
+        "leaderboards": {
+            category: {metric: _df_records(table) for metric, table in tables.items()}
+            for category, tables in leaderboards.items()
+        },
+    }
+    return ToolResponse(content=[TextBlock(type="text", text="\n".join(lines))], metadata=metadata)
+
+
 def player_multi_season_summary_tool(
     player_name: str,
     season_labels: List[str],
     *,
-    competition: str = "Premier League",
+    competition: str = "Serie A",
     competition_id: Optional[int] = None,
     competition_ids: Optional[List[int]] = None,
     competitions: Optional[List[str]] = None,
@@ -964,7 +1649,7 @@ def compare_player_season_summaries_tool(
     player_names: List[str],
     season_label: str,
     *,
-    competition: str = "Premier League",
+    competition: str = "Serie A",
     competition_id: Optional[int] = None,
     metrics: Optional[List[str]] = None,
     min_minutes: float = 0.0,
@@ -1187,6 +1872,49 @@ def _preview_events(dataset: MatchDataset, limit: int) -> List[Dict[str, object]
     return preview
 
 
+def player_report_template_tool(
+    player_name: Optional[str] = None,
+    specific_role: Optional[str] = None,
+    club_name: Optional[str] = None,
+    age: Optional[str] = None,
+    height: Optional[str] = None,
+    weight: Optional[str] = None,
+    preferred_foot: Optional[str] = None,
+    contract: Optional[str] = None,
+    market_value: Optional[str] = None,
+    matches: Optional[int] = None,
+    minutes: Optional[int] = None,
+    season_timeframe: Optional[str] = None,
+    utilization: Optional[str] = None,
+) -> ToolResponse:
+    """
+    Provide a structured JSON template for scouting reports.
+    """
+
+    template = player_scouting_report_template(
+        player_name=player_name,
+        specific_role=specific_role,
+        club_name=club_name,
+        age=age,
+        height=height,
+        weight=weight,
+        preferred_foot=preferred_foot,
+        contract=contract,
+        market_value=market_value,
+        matches=matches,
+        minutes=minutes,
+        season_timeframe=season_timeframe,
+        utilization=utilization,
+    )
+    json_payload = json.dumps(template, indent=2)
+    return ToolResponse(
+        content=[
+            TextBlock(type="text", text=json_payload),
+        ],
+        metadata={"template": template},
+    )
+
+
 __all__ = [
     "register_statsbomb_tools",
     "list_competitions_tool",
@@ -1195,11 +1923,16 @@ __all__ = [
     "count_player_passes_by_body_part_tool",
     "fetch_match_events",
     "fetch_player_season_aggregates",
+    "list_competition_players_tool",
+    "list_team_players_tool",
+    "resolve_player_current_team_tool",
     "fetch_team_season_aggregates",
     "fetch_player_match_aggregates",
+    "summarise_match_performance",
     "player_season_summary_tool",
     "team_season_summary_tool",
     "player_multi_season_summary_tool",
     "compare_player_season_summaries_tool",
+    "player_report_template_tool",
     "init_session_with_statsbomb_tools",
 ]

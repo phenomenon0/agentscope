@@ -3,13 +3,18 @@ HTTP utilities shared by API clients.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import requests
 from requests import Response
 from requests.adapters import HTTPAdapter
 from requests.auth import HTTPBasicAuth
 from urllib3.util.retry import Retry
+
+try:
+    from requests_aws4auth import AWS4Auth
+except ImportError:  # pragma: no cover - optional dependency
+    AWS4Auth = None  # type: ignore
 
 from .exceptions import APIClientError, APINotFoundError, APIRateLimitError
 
@@ -29,6 +34,7 @@ class HTTPClient:
         timeout: int = 30,
         max_retries: int = 3,
         backoff_factor: float = 0.5,
+        aws_sigv4: Optional[Dict[str, Union[str, None]]] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -48,8 +54,19 @@ class HTTPClient:
         self.session.headers.update({"Accept": "application/json"})
         if auth_token:
             self.session.headers.update({"Authorization": f"Bearer {auth_token}"})
-        if username and password:
-            self.session.auth = HTTPBasicAuth(username, password)
+        self.session_auth = None
+        if username and password and not aws_sigv4:
+            self.session_auth = HTTPBasicAuth(username, password)
+        self.aws_auth = None
+        if aws_sigv4 and AWS4Auth is not None:
+            access_key = aws_sigv4.get("access_key")
+            secret_key = aws_sigv4.get("secret_key")
+            region = aws_sigv4.get("region")
+            service = aws_sigv4.get("service") or "execute-api"
+            if access_key and secret_key and region:
+                self.aws_auth = AWS4Auth(access_key, secret_key, region, service)  # type: ignore[arg-type]
+        if self.session_auth is not None:
+            self.session.auth = self.session_auth
 
     def request(
         self,
@@ -70,6 +87,7 @@ class HTTPClient:
                 params=params,
                 json=json,
                 timeout=self.timeout,
+                auth=self.aws_auth or self.session_auth,
             )
         except requests.RequestException as exc:
             raise APIClientError(str(exc)) from exc

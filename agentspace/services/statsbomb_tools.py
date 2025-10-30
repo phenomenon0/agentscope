@@ -7,6 +7,7 @@ import dataclasses
 import re
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -40,6 +41,13 @@ _SEQUENCE_FILTER_FIELDS = {
     "play_patterns",
     "outcome_names",
     "score_states",
+}
+
+
+_MATCH_STATUS_SYNONYMS = {
+    "played": {"played", "available", "complete", "completed"},
+    "available": {"available", "played", "complete", "completed"},
+    "scheduled": {"scheduled", "not yet available"},
 }
 
 _NON_ASCII_REPLACEMENTS = {
@@ -124,6 +132,12 @@ def _normalise_season_label(label: str) -> str:
         return f"{start}/{start + 1}"
     return normalised
 
+
+def _current_season_label() -> str:
+    today = datetime.now(timezone.utc).astimezone().date()
+    start_year = today.year if today.month >= 7 else today.year - 1
+    return f"{start_year}/{start_year + 1}"
+
 POPULAR_COMPETITIONS: List[Dict[str, Any]] = [
     {
         "competition_id": 2,
@@ -145,26 +159,38 @@ POPULAR_COMPETITIONS: List[Dict[str, Any]] = [
     },
     {
         "competition_id": 9,
+        "name": "Bundesliga",
+        "aliases": ["bundesliga", "german bundesliga", "1. bundesliga"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 12,
         "name": "Serie A",
         "aliases": ["serie a", "italy serie a"],
         "season_ids": {},
     },
     {
-        "competition_id": 12,
-        "name": "Bundesliga",
-        "aliases": ["bundesliga", "german bundesliga"],
-        "season_ids": {},
-    },
-    {
-        "competition_id": 13,
+        "competition_id": 7,
         "name": "Ligue 1",
         "aliases": ["ligue 1", "french ligue 1"],
         "season_ids": {},
     },
     {
-        "competition_id": 16,
-        "name": "UEFA Champions League",
-        "aliases": ["uefa champions league", "champions league"],
+        "competition_id": 6,
+        "name": "Eredivisie",
+        "aliases": ["eredivisie", "dutch eredivisie"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 46,
+        "name": "Jupiler Pro League",
+        "aliases": ["jupiler pro league", "belgian pro league", "pro league"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 13,
+        "name": "Primeira Liga",
+        "aliases": ["primeira liga", "liga portugal", "portuguese primeira liga"],
         "season_ids": {},
     },
     {
@@ -174,24 +200,148 @@ POPULAR_COMPETITIONS: List[Dict[str, Any]] = [
         "season_ids": {},
     },
     {
-        "competition_id": 72,
-        "name": "Eredivisie",
-        "aliases": ["eredivisie", "dutch eredivisie"],
+        "competition_id": 16,
+        "name": "UEFA Champions League",
+        "aliases": ["uefa champions league", "champions league"],
         "season_ids": {},
     },
     {
-        "competition_id": 43,
-        "name": "FA Women's Super League",
-        "aliases": ["fa women's super league", "wsl"],
+        "competition_id": 35,
+        "name": "UEFA Europa League",
+        "aliases": ["uefa europa league", "europa league"],
         "season_ids": {},
     },
     {
-        "competition_id": 46,
-        "name": "UEFA Women's Champions League",
-        "aliases": ["uefa women's champions league", "women's champions league"],
+        "competition_id": 353,
+        "name": "UEFA Europa Conference League",
+        "aliases": ["uefa europa conference league", "europa conference league", "conference league", "conference europa"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 69,
+        "name": "FA Cup",
+        "aliases": ["fa cup", "emirates fa cup"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 87,
+        "name": "Copa del Rey",
+        "aliases": ["copa del rey"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 66,
+        "name": "Coppa Italia",
+        "aliases": ["coppa italia"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 86,
+        "name": "Coupe de France",
+        "aliases": ["coupe de france", "french cup"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 165,
+        "name": "DFB Pokal",
+        "aliases": ["dfb pokal", "dfb-pokal", "german cup"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 77,
+        "name": "Superliga",
+        "aliases": ["superliga", "danish superliga"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 3,
+        "name": "Championship",
+        "aliases": ["championship", "efl championship", "english championship"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 73,
+        "name": "Liga MX",
+        "aliases": ["liga mx", "mexico liga mx", "liga mx apertura", "liga mx clausura"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 108,
+        "name": "J1 League",
+        "aliases": ["j1 league", "j league", "japanese j1 league"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 10,
+        "name": "2. Bundesliga",
+        "aliases": ["2. bundesliga", "bundesliga 2", "zweite bundesliga"],
+        "season_ids": {},
+    },
+    {
+        "competition_id": 1281,
+        "name": "Serie B",
+        "aliases": ["serie b", "italy serie b"],
         "season_ids": {},
     },
 ]
+
+# Prioritise the top European leagues plus key secondary competitions.
+TOP_COMPETITION_IDS = [
+    12,   # Serie A
+    11,   # La Liga
+    9,    # 1. Bundesliga
+    7,    # Ligue 1
+    2,    # Premier League
+    46,   # Jupiler Pro League
+    13,   # Primeira Liga
+    6,    # Eredivisie
+    3,    # Championship
+    73,   # Liga MX
+    108,  # J1 League
+    37,   # Major League Soccer
+    16,   # UEFA Champions League
+    35,   # UEFA Europa League
+    353,  # UEFA Europa Conference League
+    69,   # FA Cup
+    87,   # Copa del Rey
+    66,   # Coppa Italia
+    86,   # Coupe de France
+    165,  # DFB Pokal
+    77,   # Superliga (Denmark)
+    75,   # Allsvenskan (Sweden)
+    10,   # 2. Bundesliga
+    1281, # Serie B
+]
+
+# Last reliable season IDs for top leagues in case API lacks season listings.
+_FALLBACK_SEASON_IDS = {
+    12: 318,   # Serie A 2025/2026
+    11: 318,   # La Liga 2025/2026
+    9: 318,    # Bundesliga 2025/2026
+    7: 318,    # Ligue 1 2025/2026
+    2: 318,    # Premier League 2025/2026
+    46: 318,   # Jupiler Pro League 2025/2026
+    13: 318,   # Primeira Liga 2025/2026
+    6: 318,    # Eredivisie 2025/2026
+    3: 318,    # Championship 2025/2026
+    73: 318,   # Liga MX 2025/2026
+    108: 318,  # J1 League 2025
+    37: 318,   # Major League Soccer 2025 season
+    16: 318,   # UEFA Champions League 2025/2026
+    35: 318,   # UEFA Europa League 2025/2026
+    353: 318,  # UEFA Europa Conference League 2025/2026
+    69: 354,   # FA Cup 2029/2030 (latest available)
+    87: 318,   # Copa del Rey 2025/2026
+    66: 318,   # Coppa Italia 2025/2026
+    86: 318,   # Coupe de France 2025/2026
+    165: 318,  # DFB Pokal 2025/2026
+    77: 318,   # Superliga 2025/2026
+    75: 316,   # Allsvenskan 2026 season (single-year)
+    10: 318,   # 2. Bundesliga 2025/2026
+    1281: 318, # Serie B 2025/2026
+}
+
+_player_index_cache: Dict[Tuple[int, int], List[Dict[str, Any]]] = {}
 
 _season_cache: Dict[Tuple[int, str], int] = {}
 
@@ -209,6 +359,59 @@ for entry in POPULAR_COMPETITIONS:
     for season_label, season_id in entry.get("season_ids", {}).items():
         normalised_label = _canonical(_normalise_season_label(season_label))
         _HARDCODED_SEASON_IDS[(comp_id, normalised_label)] = season_id
+
+# Ensure key aliases point to the intended first divisions.
+_POPULAR_ALIAS_INDEX.update(
+    {
+        "eredivisie": 6,
+        "dutch eredivisie": 6,
+        "jupiler pro league": 46,
+        "belgian pro league": 46,
+        "liga portugal": 13,
+        "primeira liga": 13,
+        "mls": 37,
+        "major league soccer": 37,
+        "uefa champions league": 16,
+        "champions league": 16,
+        "champions europa": 16,
+        "uefa europa league": 35,
+        "europa league": 35,
+        "europa league uefa": 35,
+        "uefa europa conference league": 353,
+        "europa conference league": 353,
+        "conference league": 353,
+        "conference europa league": 353,
+        "conference europa": 353,
+        "conference europe": 353,
+        "serie a": 12,
+        "italy serie a": 12,
+        "la liga": 11,
+        "bundesliga": 9,
+        "ligue 1": 7,
+        "fa cup": 69,
+        "emirates fa cup": 69,
+        "copa del rey": 87,
+        "coppa italia": 66,
+        "coupe de france": 86,
+        "french cup": 86,
+        "dfb pokal": 165,
+        "dfb-pokal": 165,
+        "german cup": 165,
+        "danish superliga": 77,
+        "championship": 3,
+        "efl championship": 3,
+        "english championship": 3,
+        "liga mx": 73,
+        "mexico liga mx": 73,
+        "j1 league": 108,
+        "j league": 108,
+        "zweite bundesliga": 10,
+        "2. bundesliga": 10,
+        "bundesliga 2": 10,
+        "serie b": 1281,
+        "italy serie b": 1281,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -292,7 +495,87 @@ def _to_float(value: Any) -> float:
 def _select_columns(row: Dict[str, Any], metrics: Optional[Sequence[str]]) -> Dict[str, Any]:
     if not metrics:
         return row
-    return {key: row.get(key) for key in metrics if key in row}
+    selected_keys: List[str] = []
+    for key in metrics:
+        if key in row and key not in selected_keys:
+            selected_keys.append(key)
+
+    mandatory: List[str] = []
+    if "player_name" in row:
+        mandatory.extend(
+            key
+            for key in (
+                "player_id",
+                "player_name",
+                "team_name",
+                "position",
+                "player_season_minutes",
+                "minutes_played",
+            )
+            if key in row
+        )
+    elif "team_name" in row:
+        mandatory.extend(
+            key
+            for key in ("team_id", "team_name", "competition_id", "season_id")
+            if key in row
+        )
+
+    for key in mandatory:
+        if key not in selected_keys:
+            selected_keys.append(key)
+
+    return {key: row.get(key) for key in selected_keys}
+
+
+def _augment_player_record(
+    record: Dict[str, Any],
+    metrics: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    if not record:
+        return record
+
+    minutes = _to_float(record.get("player_season_minutes"))
+    requested = set(metrics or [])
+
+    def should_compute(key: str) -> bool:
+        return not requested or key in requested or key.endswith("_per_90")
+
+    def per90_total(value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        if minutes <= 0:
+            return value
+        return value * minutes / 90.0
+
+    per90_passes = record.get("player_season_op_passes_90")
+    passing_ratio = record.get("player_season_passing_ratio")
+    progressive_90 = record.get("player_season_deep_progressions_90")
+
+    if should_compute("passes_attempted"):
+        total_attempted = per90_total(per90_passes)
+        if total_attempted is not None:
+            record.setdefault("passes_attempted", total_attempted)
+        if per90_passes is not None:
+            record.setdefault("passes_attempted_per_90", per90_passes)
+
+    if should_compute("passes_completed"):
+        completed_per90 = None
+        if per90_passes is not None and passing_ratio is not None:
+            completed_per90 = per90_passes * passing_ratio
+        if completed_per90 is not None:
+            record.setdefault("passes_completed_per_90", completed_per90)
+            record.setdefault("passes_completed", per90_total(completed_per90))
+
+    if should_compute("pass_completion_rate") and passing_ratio is not None:
+        record.setdefault("pass_completion_rate", passing_ratio * 100.0)
+
+    if should_compute("progressive_passes"):
+        if progressive_90 is not None:
+            record.setdefault("progressive_passes_per_90", progressive_90)
+            record.setdefault("progressive_passes", per90_total(progressive_90))
+
+    return record
 
 
 def list_competitions(
@@ -381,10 +664,13 @@ def list_matches(
         ]
     if match_status:
         statuses = {status.lower() for status in _ensure_sequence(match_status)}
+        expanded_statuses = set(statuses)
+        for status in statuses:
+            expanded_statuses.update(_MATCH_STATUS_SYNONYMS.get(status, {status}))
         matches = [
             match
             for match in matches
-            if match.get("match_status", "").lower() in statuses
+            if match.get("match_status", "").lower() in expanded_statuses
         ]
     return matches
 
@@ -534,7 +820,17 @@ def fetch_team_events(
 def resolve_competition_id(name: str) -> Optional[int]:
     """Resolve a competition alias to an ID using the built-in index."""
 
-    return _POPULAR_ALIAS_INDEX.get(_canonical(name))
+    canonical = _canonical(name)
+    match = _POPULAR_ALIAS_INDEX.get(canonical)
+    if match is not None:
+        return match
+
+    # Fallback: try substring match against known competition names.
+    for entry in POPULAR_COMPETITIONS:
+        comp_name = entry.get("name") or ""
+        if canonical and canonical in _canonical(comp_name):
+            return entry["competition_id"]
+    return None
 
 
 def season_id_for_label(
@@ -553,13 +849,19 @@ def season_id_for_label(
     if use_cache and key in _season_cache:
         return _season_cache[key]
 
-    seasons = list_seasons(competition_id, use_cache=use_cache)
+    try:
+        seasons = list_seasons(competition_id, use_cache=use_cache)
+    except APINotFoundError:
+        seasons = []
     for season in seasons:
         if _canonical(_normalise_season_label(season.get("season_name", ""))) == canonical_label:
             season_id = season["season_id"]
             _season_cache[key] = season_id
             _HARDCODED_SEASON_IDS.setdefault(key, season_id)
             return season_id
+    fallback = _FALLBACK_SEASON_IDS.get(competition_id)
+    if fallback is not None:
+        return fallback
     return None
 
 
@@ -575,11 +877,26 @@ def get_player_season_summary(
 ) -> Dict[str, Any]:
     """Return a summary dict for a player's season across a competition."""
 
+    resolver_info: Optional[Dict[str, Any]] = None
     if competition_id is None:
-        if competition_name is None:
-            competition_id = 2  # Premier League default
-        else:
+        if competition_name is not None:
             competition_id = resolve_competition_id(competition_name) or competition_id
+        if competition_id is None:
+            best, _ = resolve_player_current_team(
+                player_name,
+                season_label=season_label,
+                competition_ids=TOP_COMPETITION_IDS,
+                competition_names=None,
+                team_name=None,
+                min_minutes=min_minutes,
+                use_cache=use_cache,
+            )
+            if best:
+                competition_id = int(best.get("competition_id", 0)) or competition_id
+                inferred_label = best.get("season_label")
+                if inferred_label:
+                    season_label = inferred_label
+                resolver_info = best
     if competition_id is None:
         raise ValueError("Competition could not be resolved. Provide competition_id explicitly.")
 
@@ -601,7 +918,29 @@ def get_player_season_summary(
         raise ValueError(
             f"No records returned for player '{player_name}' in season '{season_label}'."
         )
-    return records[0]
+    target = _canonical(player_name)
+    target_tokens = set(target.split())
+    best_record: Optional[Dict[str, Any]] = None
+    best_score = 0
+    for record in records:
+        row_name = _canonical(record.get("player_name", ""))
+        score = 0
+        if row_name == target:
+            score = 3
+        elif target in row_name or row_name in target:
+            score = 2
+        else:
+            row_tokens = set(row_name.split())
+            if row_tokens & target_tokens:
+                score = 1
+        if score > best_score:
+            best_score = score
+            best_record = record
+    if best_record is None:
+        raise ValueError(
+            f"No records returned for player '{player_name}' in season '{season_label}'."
+        )
+    return best_record
 
 
 def get_team_season_summary(
@@ -718,6 +1057,282 @@ def get_players_season_summary(
     return summaries, missing
 
 
+def _player_index_for(
+    competition_id: int,
+    season_id: int,
+    *,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    key = (competition_id, season_id)
+    if use_cache and key in _player_index_cache:
+        return _player_index_cache[key]
+
+    rows = fetch_player_season_stats_data(
+        competition_id,
+        season_id,
+        team_name=None,
+        player_names=None,
+        min_minutes=None,
+        sort_by=None,
+        descending=True,
+        top_n=None,
+        metrics=None,
+        use_cache=use_cache,
+    )
+    _player_index_cache[key] = rows
+    return rows
+
+
+def resolve_player_current_team(
+    player_name: str,
+    *,
+    season_label: Optional[str] = None,
+    competition_ids: Optional[Sequence[int]] = None,
+    competition_names: Optional[Sequence[str]] = None,
+    team_name: Optional[str] = None,
+    min_minutes: float = 0.0,
+    use_cache: bool = True,
+    use_index: bool = True,
+) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Resolve the current team for a player across configured competitions.
+    """
+
+    try:
+        from ..indexes.statsbomb_player_index import (
+            PlayerIndexConfig,
+            query_player_index as _query_player_index,
+        )
+    except ImportError:  # pragma: no cover - cyclic import guard
+        PlayerIndexConfig = None  # type: ignore
+        def _query_player_index(*args, **kwargs):  # type: ignore
+            return []
+
+    target = _canonical(player_name)
+    if not target:
+        return None, []
+    target_tokens = set(target.split())
+
+    resolved_ids: List[int] = []
+    if competition_ids:
+        resolved_ids.extend(int(cid) for cid in competition_ids)
+    if competition_names:
+        for name in competition_names:
+            cid = resolve_competition_id(name)
+            if cid is not None:
+                resolved_ids.append(cid)
+    if not resolved_ids:
+        resolved_ids = list(TOP_COMPETITION_IDS)
+
+    normalized_label = _normalise_season_label(season_label) if season_label else None
+    desired_season = normalized_label or _current_season_label()
+    previous_year = desired_season.split("/")[0]
+    try:
+        previous_year_int = int(previous_year)
+        previous_label = f"{previous_year_int - 1}/{previous_year_int}"
+    except ValueError:
+        previous_label = None
+    season_labels = [desired_season]
+    if previous_label and previous_label not in season_labels:
+        season_labels.append(previous_label)
+
+    team_hint = _canonical(team_name) if team_name else None
+    candidates: List[Dict[str, Any]] = []
+
+    seen_keys = set()
+
+    # Seed with local index results if enabled.
+    if use_index and 'PlayerIndexConfig' in locals() and PlayerIndexConfig is not None:  # type: ignore
+        index_config = PlayerIndexConfig(
+            competitions=resolved_ids,
+            season_label=desired_season,
+            min_minutes=min_minutes,
+        )
+        try:
+            index_entries = _query_player_index(player_name, config=index_config) or []  # type: ignore
+        except Exception:  # pragma: no cover - index loading failures fall back to API
+            index_entries = []
+        for entry in index_entries:
+            entry = dict(entry)
+            entry["match_score"] = entry.get("match_score", 4)
+            entry.setdefault("season_label", desired_season)
+            entry.setdefault("competition_id", entry.get("competition_id"))
+            entry.setdefault("player_season_minutes", entry.get("player_season_minutes", 0.0))
+            key = (
+                entry.get("competition_id"),
+                entry.get("season_label"),
+                entry.get("team_name"),
+                entry.get("player_id"),
+            )
+            if key not in seen_keys:
+                seen_keys.add(key)
+                candidates.append(entry)
+
+    if candidates:
+        ordered = sorted(
+            candidates,
+            key=lambda row: (
+                -row.get("match_score", 0),
+                -row.get("player_season_minutes", 0.0),
+            ),
+        )
+        return ordered[0], ordered
+
+    seen_keys = {
+        (
+            entry.get("competition_id"),
+            entry.get("season_label"),
+            entry.get("team_name"),
+            entry.get("player_id"),
+        )
+        for entry in candidates
+    }
+
+    for comp_id in resolved_ids:
+        seen_seasons: set[int] = set()
+        for label in season_labels:
+            season_id = season_id_for_label(comp_id, label, use_cache=use_cache)
+            if season_id is None:
+                season_id = _FALLBACK_SEASON_IDS.get(comp_id)
+                if season_id is None:
+                    continue
+            if season_id in seen_seasons:
+                continue
+            seen_seasons.add(season_id)
+            rows = _player_index_for(comp_id, season_id, use_cache=use_cache)
+            if not rows and label != desired_season:
+                continue
+            from difflib import SequenceMatcher  # local import for lightweight fuzzy check
+            for row in rows:
+                row_name = _canonical(row.get("player_name", ""))
+                if not row_name:
+                    continue
+                score = 0
+                if row_name == target:
+                    score = 3
+                elif target in row_name or row_name in target:
+                    score = 2
+                else:
+                    row_tokens = set(row_name.split())
+                    if row_tokens & target_tokens:
+                        score = 1
+                    else:
+                        # Fuzzy similarity on de-spaced names to handle minor variants
+                        sim = SequenceMatcher(
+                            a=target.replace(" ", ""), b=row_name.replace(" ", "")
+                        ).ratio()
+                        if sim >= 0.85:
+                            score = max(score, 2)
+                if score == 0:
+                    continue
+                minutes = _to_float(
+                    row.get("player_season_minutes") or row.get("minutes_played")
+                )
+                if minutes < float(min_minutes):
+                    continue
+                if team_hint and row.get("team_name"):
+                    canonical_team = _canonical(row["team_name"])
+                    if canonical_team == team_hint:
+                        score += 2
+                    elif team_hint in canonical_team or canonical_team in team_hint:
+                        score += 1
+                candidate = dict(row)
+                candidate.update(
+                    {
+                        "competition_id": comp_id,
+                        "season_id": season_id,
+                        "season_label": label,
+                        "match_score": score,
+                        "player_season_minutes": minutes,
+                    }
+                )
+                key = (
+                    candidate.get("competition_id"),
+                    candidate.get("season_label"),
+                    candidate.get("team_name"),
+                    candidate.get("player_id"),
+                )
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                candidates.append(candidate)
+
+    if not candidates:
+        return None, []
+
+    best = max(
+        candidates,
+        key=lambda row: (
+            row.get("match_score", 0),
+            row.get("player_season_minutes", 0.0),
+        ),
+    )
+    ordered = sorted(
+        candidates,
+        key=lambda row: (
+            -row.get("match_score", 0),
+            -row.get("player_season_minutes", 0.0),
+        ),
+    )
+    return best, ordered
+
+
+def get_competition_players(
+    *,
+    season_label: Optional[str] = None,
+    season_id: Optional[int] = None,
+    competition_id: Optional[int] = None,
+    competition_name: Optional[str] = None,
+    team_name: Optional[str] = None,
+    min_minutes: float = 0.0,
+    sort_by: Optional[str] = None,
+    descending: bool = True,
+    top_n: Optional[int] = None,
+    metrics: Optional[Sequence[str]] = None,
+    use_cache: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve player season aggregates for a competition (optionally filtered to a team).
+    """
+
+    if competition_id is None:
+        if competition_name is None:
+            competition_id = TOP_COMPETITION_IDS[0] if TOP_COMPETITION_IDS else None
+        else:
+            competition_id = resolve_competition_id(competition_name)
+        if competition_id is None and competition_name is None:
+            competition_id = TOP_COMPETITION_IDS[0] if TOP_COMPETITION_IDS else None
+    if competition_id is None:
+        raise ValueError("Competition could not be resolved. Provide competition_id explicitly.")
+
+    resolved_season_id = season_id
+    if resolved_season_id is None:
+        if season_label is None:
+            raise ValueError("Provide season_label or season_id to retrieve player lists.")
+        resolved_season_id = season_id_for_label(
+            competition_id,
+            season_label,
+            use_cache=use_cache,
+        )
+        if resolved_season_id is None:
+            raise ValueError(
+                f"No season_id found for label '{season_label}' in competition {competition_id}."
+            )
+
+    rows = fetch_player_season_stats_data(
+        competition_id,
+        resolved_season_id,
+        team_name=team_name,
+        min_minutes=min_minutes,
+        sort_by=sort_by,
+        descending=descending,
+        top_n=top_n,
+        metrics=metrics,
+        use_cache=use_cache,
+    )
+    return rows
+
+
 def fetch_player_season_stats_data(
     competition_id: int,
     season_id: int,
@@ -735,12 +1350,19 @@ def fetch_player_season_stats_data(
     Retrieve player season aggregates with optional filtering and sorting.
     """
     client = get_statsbomb_client()
-    rows = client.get_player_season_stats(
-        competition_id,
-        season_id,
-        use_cache=use_cache,
-    )
+    try:
+        rows = client.get_player_season_stats(
+            competition_id,
+            season_id,
+            use_cache=use_cache,
+        )
+    except APINotFoundError:
+        return []
     filtered: List[Dict[str, Any]] = []
+    # Build a selection list with canonical names and token sets for matching.
+    # We will also use a lightweight similarity check to catch close variants
+    # (diacritics already handled by _canonical, this helps spacing/order).
+    from difflib import SequenceMatcher  # local import to avoid top-level dep
     selected_players: List[Tuple[str, set[str]]] = []
     for name in player_names or []:
         canonical_name = _canonical(name)
@@ -749,23 +1371,30 @@ def fetch_player_season_stats_data(
 
     target_team = _canonical(team_name) if team_name else None
     for row in rows:
-        row_team = _canonical(row.get("team_name", ""))
+        row_data = dict(row)
+        _augment_player_record(row_data, metrics)
+        row_team = _canonical(row_data.get("team_name", ""))
         if target_team and row_team != target_team:
             continue
-        row_player = _canonical(row.get("player_name", ""))
+        row_player = _canonical(row_data.get("player_name", ""))
         if selected_players:
             row_tokens = set(row_player.split())
+            # similarity check across all requested players; accept if any hit
+            def _similar(a: str, b: str) -> float:
+                return SequenceMatcher(a=a.replace(" ", ""), b=b.replace(" ", "")).ratio()
+
             if not any(
                 canonical == row_player
                 or canonical in row_player
                 or row_player in canonical
                 or (tokens and row_tokens and tokens & row_tokens)
+                or (_similar(canonical, row_player) >= 0.85)
                 for canonical, tokens in selected_players
             ):
                 continue
-        if min_minutes is not None and _to_float(row.get("player_season_minutes")) < float(min_minutes):
+        if min_minutes is not None and _to_float(row_data.get("player_season_minutes")) < float(min_minutes):
             continue
-        filtered.append(_select_columns(row, metrics))
+        filtered.append(_select_columns(row_data, metrics))
 
     if sort_by:
         filtered.sort(key=lambda item: _to_float(item.get(sort_by)), reverse=descending)
@@ -788,11 +1417,14 @@ def fetch_team_season_stats_data(
     Retrieve team season aggregates with optional sorting.
     """
     client = get_statsbomb_client()
-    rows = client.get_team_season_stats(
-        competition_id,
-        season_id,
-        use_cache=use_cache,
-    )
+    try:
+        rows = client.get_team_season_stats(
+            competition_id,
+            season_id,
+            use_cache=use_cache,
+        )
+    except APINotFoundError:
+        return []
     processed = [_select_columns(row, metrics) for row in rows]
     if sort_by:
         processed.sort(key=lambda item: _to_float(item.get(sort_by)), reverse=descending)
@@ -815,7 +1447,10 @@ def fetch_player_match_stats_data(
     Retrieve player match stats for a given match.
     """
     client = get_statsbomb_client()
-    rows = client.get_player_match_stats(match_id, use_cache=use_cache)
+    try:
+        rows = client.get_player_match_stats(match_id, use_cache=use_cache)
+    except APINotFoundError:
+        return []
     filtered: List[Dict[str, Any]] = []
     target_team = team_name.lower() if team_name else None
     for row in rows:

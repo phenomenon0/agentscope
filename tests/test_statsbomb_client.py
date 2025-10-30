@@ -33,7 +33,11 @@ def _settings(tmp_path) -> APISettings:
         wyscout_token="token",
         wyscout_client_id="client",
         wyscout_client_secret="secret",
-        wyscout_api_version="v1",
+        wyscout_api_version="v4",
+        wyscout_aws_access_key="client",
+        wyscout_aws_secret_key="secret",
+        wyscout_aws_region="eu-west-1",
+        wyscout_aws_service="execute-api",
         cache_dir=str(tmp_path),
     )
 

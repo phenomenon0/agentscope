@@ -7,3 +7,30 @@ pytest.err
 pytest.out
 .mygit/
 agentspace/agents/.env
+.codex/secrets.sh
+
+# Logs
+*.log
+backend.log
+
+# Generated files
+SYMBOLS_INDEX.json
+SYMBOLS_INDEX.md
+
+# Temporary directories
+tmp_idx/
+.codex/
+
+# Generated plots
+plots/
+sample.png
+
+# Screenshots (optional - uncomment if you want to include them)
+# screenshots/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env.production.local
