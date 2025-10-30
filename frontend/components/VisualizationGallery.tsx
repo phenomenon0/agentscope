@@ -20,7 +20,7 @@ export function VisualizationGallery({ attachments, className }: VisualizationGa
   }
 
   return (
-    <section className={classNames("grid gap-4 md:grid-cols-2", className)}>
+    <section className={classNames("grid gap-4 md:grid-cols-1 lg:grid-cols-2", className)}>
       {images.map((attachment) => {
         const src =
           (attachment.src && attachment.src.length > 0
@@ -44,12 +44,12 @@ export function VisualizationGallery({ attachments, className }: VisualizationGa
               rel="noopener noreferrer"
               className="group block"
             >
-              <div className="relative h-48 w-full bg-neutral-50">
+              <div className="relative h-96 md:h-[500px] w-full bg-neutral-50">
                 <Image
                   src={src}
                   alt={altText}
                   fill
-                  sizes="(min-width: 768px) 320px, 100vw"
+                  sizes="(min-width: 1024px) 50vw, 100vw"
                   className="object-contain transition-transform duration-200 group-hover:scale-[1.02]"
                   priority={false}
                   unoptimized
