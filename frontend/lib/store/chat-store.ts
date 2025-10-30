@@ -11,6 +11,16 @@ export type ChatAttachment = {
   alt?: string;
 };
 
+export type ToolCall = {
+  id: string;
+  tool_name: string;
+  status: "running" | "completed" | "failed";
+  input?: Record<string, unknown>;
+  output?: string;
+  timestamp?: number;
+  duration_ms?: number;
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -18,6 +28,7 @@ export type ChatMessage = {
   planPreview?: boolean;
   streamingDone?: boolean;
   attachments?: ChatAttachment[];
+  toolCalls?: ToolCall[];
   metadata?: Record<string, unknown>;
 };
 

@@ -1,14 +1,16 @@
 import classNames from "classnames";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatAttachment } from "@/lib/store/chat-store";
+import type { ChatAttachment, ToolCall } from "@/lib/store/chat-store";
 import { VisualizationGallery } from "./VisualizationGallery";
+import { ToolExecutionTimeline } from "./ToolExecutionTimeline";
 
 type MessageBubbleProps = {
   role: "user" | "assistant" | "system";
   content: string;
   planPreview?: boolean;
   attachments?: ChatAttachment[];
+  toolCalls?: ToolCall[];
 };
 
 const roleStyles: Record<MessageBubbleProps["role"], string> = {
@@ -23,16 +25,18 @@ const roleLabel: Record<MessageBubbleProps["role"], string> = {
   system: "System",
 };
 
-export function MessageBubble({ role, content, planPreview, attachments }: MessageBubbleProps) {
+export function MessageBubble({ role, content, planPreview, attachments, toolCalls }: MessageBubbleProps) {
   const renderedContent = planPreview ? `_${content}_` : content;
   const label = planPreview && role === "assistant" ? "Plan Preview" : roleLabel[role];
   const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
 
   return (
     <article className={classNames("max-w-3xl rounded-3xl border px-5 py-4 text-sm leading-relaxed", roleStyles[role])}>
       <header className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
         {label}
       </header>
+      {hasToolCalls && <ToolExecutionTimeline toolCalls={toolCalls} className="mb-4" />}
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         className="markdown text-neutral-900 [&>h1]:text-lg [&>h2]:text-base [&>h3]:text-sm [&>ul]:list-disc [&>ul]:pl-6 [&>ol]:list-decimal [&>ol]:pl-6 [&>p]:mt-2 [&>p:first-child]:mt-0"

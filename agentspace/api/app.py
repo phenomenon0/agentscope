@@ -83,6 +83,7 @@ class ChatResponse(BaseModel):
     reply: str
     metadata: Optional[Dict[str, Any]] = None
     attachments: Optional[List[Dict[str, Any]]] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
 
 
 _chat_sessions: Dict[str, AgentSession] = {}
@@ -453,6 +454,81 @@ def _format_context_for_prompt(team_context: Optional[Dict[str, Any]]) -> str:
     )
 
 
+async def _extract_tool_calls_from_memory(
+    agent: ReActAgent,
+    max_lookback: int = 20,
+) -> List[Dict[str, Any]]:
+    """Extract tool call information from agent memory for display in UI."""
+    tool_calls: List[Dict[str, Any]] = []
+
+    try:
+        history = await agent.memory.get_memory()  # type: ignore[call-arg]
+    except Exception as exc:
+        print(f"Warning: unable to read agent memory for tool calls: {exc}")
+        return tool_calls
+
+    if not history:
+        return tool_calls
+
+    # Look at recent messages
+    recent_messages = history[-max_lookback:]
+
+    for hist_msg in recent_messages:
+        msg_role = getattr(hist_msg, "role", None)
+        msg_name = getattr(hist_msg, "name", None)
+        content = getattr(hist_msg, "content", None)
+
+        # Check for tool use messages
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, Mapping):
+                    continue
+
+                # Tool use block
+                if block.get("type") == "tool_use":
+                    tool_calls.append({
+                        "id": block.get("id", ""),
+                        "tool_name": block.get("name", "unknown_tool"),
+                        "status": "completed",
+                        "input": block.get("input", {}),
+                        "timestamp": time.time(),
+                    })
+
+                # Tool result block
+                elif block.get("type") == "tool_result":
+                    tool_id = block.get("tool_use_id", "")
+                    # Update the matching tool call with result
+                    for tc in tool_calls:
+                        if tc.get("id") == tool_id:
+                            output = block.get("output")
+                            if isinstance(output, list):
+                                # Extract text from output blocks
+                                text_parts = []
+                                for out_block in output:
+                                    if isinstance(out_block, Mapping) and out_block.get("type") == "text":
+                                        text_parts.append(out_block.get("text", ""))
+                                tc["output"] = "\n".join(text_parts)[:500]  # Limit output length
+                            elif isinstance(output, str):
+                                tc["output"] = output[:500]
+                            break
+
+        # Also check for messages with tool metadata
+        metadata = getattr(hist_msg, "metadata", None)
+        if isinstance(metadata, Mapping) and metadata.get("tool_name"):
+            # This is a tool execution message
+            tool_calls.append({
+                "id": metadata.get("tool_id", f"tool_{len(tool_calls)}"),
+                "tool_name": metadata.get("tool_name", "unknown"),
+                "status": metadata.get("status", "completed"),
+                "input": metadata.get("input", {}),
+                "output": metadata.get("output", "")[:500] if metadata.get("output") else None,
+                "timestamp": metadata.get("timestamp", time.time()),
+                "duration_ms": metadata.get("duration_ms"),
+            })
+
+    return tool_calls
+
+
 def _plan_preview_system_prompt() -> str:
     return (
         "You are Claude 3 Haiku providing live planning narration for a StatsBomb analyst agent. "
@@ -771,9 +847,11 @@ async def agent_chat(request: ChatRequest) -> ChatResponse:
             )
         )
         tool_attachments, tool_metadata = await _extract_tool_visualizations_from_memory(agent)
+        tool_calls = await _extract_tool_calls_from_memory(agent)
 
         # DEBUG: Log extraction results
         print(f"DEBUG: Extracted {len(tool_attachments)} tool attachments")
+        print(f"DEBUG: Extracted {len(tool_calls)} tool calls")
         print(f"DEBUG: Tool metadata keys: {list(tool_metadata.keys())}")
         if tool_attachments:
             for i, att in enumerate(tool_attachments):
@@ -799,6 +877,7 @@ async def agent_chat(request: ChatRequest) -> ChatResponse:
 
     # DEBUG: Log final response
     print(f"DEBUG: Returning {len(attachments) if attachments else 0} total attachments")
+    print(f"DEBUG: Returning {len(tool_calls) if tool_calls else 0} tool calls")
     print(f"DEBUG: Final metadata has viz_type: {final_metadata.get('viz_type', 'NONE')}")
 
     return ChatResponse(
@@ -806,6 +885,7 @@ async def agent_chat(request: ChatRequest) -> ChatResponse:
         reply=reply_text,
         metadata=final_metadata or None,
         attachments=attachments or None,
+        tool_calls=tool_calls or None,
     )
 
 

@@ -528,6 +528,7 @@ export function ChatPanel() {
       const primaryAttachments = convertResponseAttachments(data.attachments);
       const metadataAttachments = extractAttachments(metadata);
       const attachments = mergeAttachments(primaryAttachments, metadataAttachments);
+      const toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : [];
 
       const assistantMessage: ChatMessage = {
         id: makeId(),
@@ -535,6 +536,7 @@ export function ChatPanel() {
         content: replyText,
         metadata,
         ...(attachments.length > 0 ? { attachments } : {}),
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
       };
       addMessage(assistantMessage);
     } catch (error) {
@@ -634,6 +636,7 @@ export function ChatPanel() {
               content={message.content}
               planPreview={message.planPreview}
               attachments={message.attachments}
+              toolCalls={message.toolCalls}
             />
           ))}
           {chatError && (
