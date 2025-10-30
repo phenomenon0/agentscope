@@ -26,6 +26,7 @@ from agentspace.agent_tools.index_lookup import register_statsbomb_index_tools
 from agentspace.agent_tools.online_index import register_statsbomb_online_index_tools
 from agentspace.agent_tools.offline_sqlite import register_offline_index_tools
 from agentspace.agent_tools.viz import register_statsbomb_viz_tools
+from agentspace.agent_tools.advanced_viz import register_advanced_viz_tools
 from agentspace.agent_tools.wyscout import register_wyscout_tools
 from agentspace.agent_tools.web_search import register_web_search_tools
 
@@ -368,6 +369,7 @@ def _build_toolkit(
     register_statsbomb_index_tools(toolkit, group_name="statsbomb-index", activate=True)
     register_wyscout_tools(toolkit, group_name="wyscout", activate=True)
     register_statsbomb_viz_tools(toolkit, group_name="statsbomb-viz", activate=True)
+    register_advanced_viz_tools(toolkit, group_name="advanced-viz", activate=True)
     register_web_search_tools(toolkit, group_name="web", activate=True)
     return toolkit
 

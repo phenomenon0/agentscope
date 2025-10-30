@@ -26,6 +26,10 @@ from .viz import (
     plot_event_heatmap_tool,
     plot_pass_network_tool,
 )
+from .advanced_viz import (
+    register_advanced_viz_tools,
+    plot_pizza_chart_tool,
+)
 from .offline_sqlite import (
     register_offline_index_tools,
 )
@@ -36,6 +40,7 @@ __all__ = [
     "register_statsbomb_online_index_tools",
     "register_wyscout_tools",
     "register_statsbomb_viz_tools",
+    "register_advanced_viz_tools",
     "list_competition_players_tool",
     "list_team_players_tool",
     "player_season_summary_tool",
@@ -47,5 +52,6 @@ __all__ = [
     "plot_match_shot_map_tool",
     "plot_event_heatmap_tool",
     "plot_pass_network_tool",
+    "plot_pizza_chart_tool",
     "register_offline_index_tools",
 ]
