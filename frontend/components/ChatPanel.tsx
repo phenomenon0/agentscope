@@ -2,18 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
-import { Sparkles, ArrowRight, Loader2, Send } from "lucide-react";
+import {
+  Sparkles,
+  ArrowRight,
+  Loader2,
+  Send,
+  TrendingUp,
+  CalendarDays,
+  MessageCircle,
+} from "lucide-react";
 import {
   Persona,
   API_BASE_URL,
   DEFAULT_COMPETITION_ID,
   DEFAULT_SEASON_LABEL,
+  PRESET_TEAMS,
 } from "@/lib/constants";
-import { Sidebar } from "./Sidebar";
 import { MessageBubble } from "./MessageBubble";
+import { ToolExecutionTimeline } from "./ToolExecutionTimeline";
 import {
   ChatAttachment,
   ChatMessage,
+  ToolCall,
   useChatStore,
 } from "@/lib/store/chat-store";
 import { Button } from "@/components/ui/button";
@@ -29,6 +39,18 @@ const fetcher = async (url: string) => {
   return res.json();
 };
 
+const personaDescriptions: Record<Persona, string> = {
+  Analyst: "Rapid-fire data takes grounded in StatsBomb metrics and context windows.",
+  "Scouting Evaluator": "Long-form scouting synthesis with comps, archetypes, and tactical fit.",
+};
+
+const formatToolName = (name: string) =>
+  name
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
 const toTeamUrl = (team: string) =>
   `${API_BASE_URL}/api/team/context?competition_id=${DEFAULT_COMPETITION_ID}&season_label=${encodeURIComponent(
     DEFAULT_SEASON_LABEL,
@@ -38,14 +60,6 @@ const makeId = () =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
-
-type RosterEntry = {
-  player_name?: string;
-  position?: string | null;
-  minutes?: number | null;
-  goals?: number | null;
-  assists?: number | null;
-};
 
 export function ChatPanel() {
   const persona = useChatStore((state) => state.persona);
@@ -63,7 +77,6 @@ export function ChatPanel() {
   const setChatError = useChatStore((state) => state.setChatError);
   const isLoading = useChatStore((state) => state.isLoading);
   const setIsLoading = useChatStore((state) => state.setIsLoading);
-  const reportLoading = useChatStore((state) => state.reportLoading);
   const setReportLoading = useChatStore((state) => state.setReportLoading);
   const compressLoading = useChatStore((state) => state.compressLoading);
   const setCompressLoading = useChatStore((state) => state.setCompressLoading);
@@ -90,6 +103,208 @@ export function ChatPanel() {
       team_summary: teamData.team_summary,
     };
   }, [teamData]);
+
+  const recordDisplay = useMemo(() => {
+    const record = teamContext?.record;
+    if (!record) {
+      return "—";
+    }
+    const wins = typeof record.won === "number" ? record.won : 0;
+    const draws = typeof record.drawn === "number" ? record.drawn : 0;
+    const losses = typeof record.lost === "number" ? record.lost : 0;
+    return `${wins}W-${draws}D-${losses}L`;
+  }, [teamContext]);
+
+  const nextMatchInfo = useMemo(() => {
+    const nextMatch = teamContext?.next_match;
+    if (!nextMatch) {
+      return { opponent: "Opponent TBC", venue: "", date: "—" };
+    }
+    const opponent =
+      typeof nextMatch.opponent === "string" && nextMatch.opponent.trim().length > 0
+        ? nextMatch.opponent
+        : "Opponent TBC";
+    const venue =
+      typeof nextMatch.venue === "string" && nextMatch.venue.trim().length > 0
+        ? nextMatch.venue
+        : "";
+    const rawDate = typeof nextMatch.date === "string" ? nextMatch.date : undefined;
+    let formattedDate = rawDate ?? "—";
+    if (rawDate) {
+      const parsed = new Date(rawDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        formattedDate = parsed.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        });
+      }
+    }
+    return { opponent, venue, date: formattedDate };
+  }, [teamContext]);
+
+  const generatedAtDisplay = useMemo(() => {
+    const generatedAt = teamContext?.generated_at;
+    if (!generatedAt) {
+      return null;
+    }
+    const parsed = new Date(generatedAt);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    return generatedAt;
+  }, [teamContext]);
+
+  const activeToolNames = useMemo(() => {
+    const names = new Set<string>();
+    messages.forEach((message) => {
+      message.toolCallNames?.forEach((name) => {
+        if (name && name.trim().length > 0) {
+          names.add(name);
+        }
+      });
+      message.toolCalls?.forEach((call) => {
+        const name = call.tool_name;
+        if (name && name.trim().length > 0) {
+          names.add(name);
+        }
+      });
+    });
+    return Array.from(names).slice(0, 4);
+  }, [messages]);
+
+  const messageCount = messages.length;
+  const personaTheme = useMemo(() => {
+    if (persona === "Analyst") {
+      return {
+        gradient: "from-white via-[#eef5ff] to-[#f7fbff]",
+        activeButton: "border-[#0f172a] bg-[#0f172a] text-white shadow-[0_18px_38px_-24px_rgba(15,23,42,0.55)]",
+        chip: "bg-[#e6eeff] text-[#1d4ed8]",
+        statBorder: "border-[#dbe7ff]",
+        statTint: "bg-[#f5f7ff]",
+      } as const;
+    }
+    return {
+      gradient: "from-white via-[#fff2e5] to-[#fff8f1]",
+      activeButton: "border-[#7c2d12] bg-[#7c2d12] text-white shadow-[0_18px_38px_-24px_rgba(124,45,18,0.45)]",
+      chip: "bg-[#ffe8d8] text-[#b45309]",
+      statBorder: "border-[#fde3c7]",
+      statTint: "bg-[#fff4ec]",
+    } as const;
+  }, [persona]);
+
+
+  const toolExecutionEvents = useMemo(() => {
+    const seen = new Set<string>();
+    const events: ToolCall[] = [];
+    messages.forEach((message) => {
+      if (!Array.isArray(message.toolCalls)) {
+        return;
+      }
+      message.toolCalls.forEach((call, index) => {
+        const key =
+          (call.id && typeof call.id === "string" && call.id.length > 0)
+            ? call.id
+            : `${call.tool_name}-${call.timestamp ?? index}`;
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+        events.push(call);
+      });
+    });
+    return events.sort((a, b) => {
+      const timeA = a.timestamp ?? 0;
+      const timeB = b.timestamp ?? 0;
+      if (timeA === timeB) {
+        return 0;
+      }
+      return timeB - timeA;
+    });
+  }, [messages]);
+
+  const activeToolEvents = useMemo(
+    () => toolExecutionEvents.filter((event) => event.status !== "completed"),
+    [toolExecutionEvents],
+  );
+
+  const showToolTimeline = activeToolEvents.length > 0;
+
+  const heroSummary = useMemo(() => {
+    const summary = teamContext?.team_summary;
+    if (!summary) {
+      return personaDescriptions[persona];
+    }
+    if (typeof summary === "string") {
+      return summary;
+    }
+    if (Array.isArray(summary)) {
+      const textual = summary.filter((item) => typeof item === "string") as string[];
+      if (textual.length > 0) {
+        return textual.join(" • ");
+      }
+    }
+    if (typeof summary === "object" && summary !== null) {
+      const points =
+        typeof summary.team_season_points === "number"
+          ? `${summary.team_season_points} pts`
+          : undefined;
+      const goalDifferenceValue =
+        typeof summary.goal_difference === "number"
+          ? summary.goal_difference
+          : typeof summary.team_season_gd === "number"
+            ? summary.team_season_gd
+            : undefined;
+      const goalDifference =
+        typeof goalDifferenceValue === "number"
+          ? `${goalDifferenceValue >= 0 ? "+" : ""}${goalDifferenceValue} GD`
+          : undefined;
+      const xgFor =
+        typeof summary.team_season_np_xg_pg === "number"
+          ? summary.team_season_np_xg_pg
+          : typeof summary.team_season_xg_pg === "number"
+            ? summary.team_season_xg_pg
+            : undefined;
+      const xgAgainst =
+        typeof summary.team_season_np_xg_conceded_pg === "number"
+          ? summary.team_season_np_xg_conceded_pg
+          : typeof summary.team_season_xg_per_sp_conceded === "number"
+            ? summary.team_season_xg_per_sp_conceded
+            : undefined;
+      const aggression =
+        typeof summary.team_season_aggression === "number"
+          ? `${Math.round(summary.team_season_aggression * 100)}th percentile aggression`
+          : undefined;
+      const pace =
+        typeof summary.team_season_pace_towards_goal === "number"
+          ? `${summary.team_season_pace_towards_goal.toFixed(1)} m/s pace`
+          : undefined;
+
+      const snippets: string[] = [];
+      if (points || goalDifference) {
+        snippets.push(
+          [`On ${points ?? "steady form"}`, goalDifference ? `with ${goalDifference}` : null]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
+      if (typeof xgFor === "number" && typeof xgAgainst === "number") {
+        snippets.push(
+          `xG profile ${xgFor.toFixed(2)} for / ${xgAgainst.toFixed(2)} against per game`,
+        );
+      }
+      if (pace) {
+        snippets.push(`Transitions at ${pace}`);
+      }
+      if (aggression) {
+        snippets.push(aggression);
+      }
+
+      if (snippets.length > 0) {
+        return snippets.join(". ");
+      }
+    }
+    return personaDescriptions[persona];
+  }, [teamContext?.team_summary, persona]);
 
   const [inputValue, setInputValue] = useState("");
   const toolPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -284,7 +499,7 @@ export function ChatPanel() {
           return;
         }
         const payload = await response.json();
-        const toolCalls = Array.isArray(payload.tool_calls) ? payload.tool_calls : [];
+        const toolCalls = Array.isArray(payload.tool_calls) ? (payload.tool_calls as ToolCall[]) : [];
         const toolCallNames = toolCalls
           .map((call: any) => (typeof call?.tool_name === "string" ? call.tool_name : ""))
           .filter((name: string): name is string => Boolean(name));
@@ -292,14 +507,14 @@ export function ChatPanel() {
         updateMessage(messageId, (message) => ({
           ...message,
           toolCallNames: uniqueNames,
-          toolCalls: undefined,
+          toolCalls: toolCalls.length > 0 ? toolCalls : message.toolCalls,
         }));
         // Don't scroll during tool polling - only on final message
       } catch (error) {
         console.error("Tool polling failed", error);
       }
     },
-    [updateMessage, scrollToBottom],
+    [updateMessage],
   );
 
   const startToolPolling = useCallback(
@@ -362,84 +577,6 @@ export function ChatPanel() {
   useEffect(() => {
     void resetConversation();
   }, [persona, team, resetConversation]);
-
-  const handlePlayerReport = useCallback(
-    async (player: RosterEntry) => {
-      const playerName = player.player_name;
-      if (!playerName) {
-        return;
-      }
-      const season = teamContext?.season_label ?? DEFAULT_SEASON_LABEL;
-      const competitionId = teamData?.competition_id ?? DEFAULT_COMPETITION_ID;
-
-      setReportLoading(playerName);
-      try {
-        const params = new URLSearchParams({
-          player_name: playerName,
-          season_label: season,
-        });
-        if (competitionId) {
-          params.set("competition_id", String(competitionId));
-        }
-
-        const response = await fetch(`/api/player/report?${params.toString()}`);
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data?.error ?? "Unable to build player report.");
-        }
-
-        const highlights = (data.highlights ?? []) as Array<{ label?: string; value?: number }>;
-        const metrics = (data.metrics ?? {}) as Record<string, unknown>;
-
-        let markdown = `### Player Snapshot: ${data.player_name ?? playerName}`;
-        markdown += `\n- Team: ${data.team_name ?? "n/a"}`;
-        markdown += `\n- Season: ${data.season_label ?? season}`;
-
-        if (highlights.length) {
-          markdown += "\n\n**Highlights**\n";
-          for (const item of highlights) {
-            markdown += `- ${item.label ?? "Metric"}: ${item.value ?? 0}\n`;
-          }
-        }
-
-        const keyMetrics = [
-          ["player_season_minutes", "Minutes"],
-          ["player_season_goals", "Goals"],
-          ["player_season_assists", "Assists"],
-          ["player_season_xg", "xG"],
-          ["player_season_xa", "xA"],
-          ["player_season_shots", "Shots"],
-        ] as const;
-
-        const metricLines = keyMetrics
-          .map(([key, label]) => {
-            const value = metrics[key];
-            if (value === null || value === undefined || value === "") {
-              return null;
-            }
-            return `- ${label}: ${value}`;
-          })
-          .filter(Boolean);
-
-        if (metricLines.length) {
-          markdown += "\n**Key Season Metrics**\n" + metricLines.join("\n") + "\n";
-        }
-
-        const assistantMessage: ChatMessage = {
-          id: makeId(),
-          role: "assistant",
-          content: markdown,
-        };
-        addMessage(assistantMessage);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to generate player report.";
-        setChatError(message);
-      } finally {
-        setReportLoading(null);
-      }
-    },
-    [teamContext?.season_label, teamData?.competition_id, addMessage, setChatError, setReportLoading],
-  );
 
   const compressConversation = useCallback(async () => {
     if (!sessionId) {
@@ -540,7 +677,7 @@ export function ChatPanel() {
       const primaryAttachments = convertResponseAttachments(data.attachments);
       const metadataAttachments = extractAttachments(metadata);
       const attachments = mergeAttachments(primaryAttachments, metadataAttachments);
-      const toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : [];
+      const toolCalls = Array.isArray(data.tool_calls) ? (data.tool_calls as ToolCall[]) : [];
 
       updateMessage(assistantMessageId, (message) => {
         let finalContent = replyText.trim();
@@ -558,7 +695,7 @@ export function ChatPanel() {
           content: finalContent,
           metadata,
           attachments: attachments.length > 0 ? attachments : undefined,
-          toolCalls: undefined,
+          toolCalls: toolCalls.length > 0 ? (toolCalls as ToolCall[]) : message.toolCalls,
           toolCallNames: undefined,
           streamingDone: true,
           statusHint: undefined,
@@ -605,93 +742,200 @@ export function ChatPanel() {
   };
 
   return (
-    <div className="relative mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pb-12 pt-10 lg:flex-row lg:px-8">
-
-      <Sidebar
-        persona={persona}
-        onPersonaChange={setPersona}
-        team={team}
-        onTeamChange={setTeam}
-        teamName={teamContext?.team_name}
-        competitionName={teamContext?.competition_name}
-        seasonLabel={teamContext?.season_label}
-        tablePosition={teamContext?.table_position}
-        tableSize={teamContext?.table_size}
-        record={teamContext?.record}
-        nextMatch={teamContext?.next_match}
-        generatedAt={teamContext?.generated_at}
-        table={teamData?.table ?? null}
-        roster={teamData?.roster_table ?? null}
-        played={teamData?.matches_played ?? null}
-        upcoming={teamData?.matches_upcoming ?? null}
-        topStats={teamData?.top_stats ?? null}
-        onPlayerReport={handlePlayerReport}
-        reportLoading={reportLoading}
-      />
-
+    <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pb-16 pt-10 lg:px-8">
       <main
         className={cn(
-          "glass-panel relative flex h-[calc(100vh-4.5rem)] flex-1 flex-col overflow-hidden",
-          "rounded-[28px]"
+          "relative flex min-h-[75vh] flex-1 flex-col overflow-hidden rounded-[40px]",
+          "border border-white/30 bg-white/70 shadow-[0_45px_120px_-60px_rgba(15,23,42,0.32)] backdrop-blur-2xl"
         )}
       >
-        <header className="relative border-b border-white/40 bg-white/70 px-8 py-7 backdrop-blur">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-3">
+        <header
+          className={cn(
+            "relative flex flex-col gap-3 border-b border-white/30 px-5 py-4 sm:px-7 sm:py-5",
+            "bg-gradient-to-br",
+            personaTheme.gradient
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-500">
+            <div className="flex items-center gap-2">
               <Badge
                 variant="secondary"
-                className="flex w-max items-center gap-2 border border-white/40 bg-white/70 text-xs font-medium uppercase tracking-[0.2em] text-neutral-600"
+                className="flex items-center gap-2 rounded-full border border-white/50 bg-white/75 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-600"
               >
                 <Sparkles className="h-3.5 w-3.5 text-slate-500" />
-                Live Analytics Workspace
+                Intelligence Mode
               </Badge>
-              <div>
-                <h1 className="text-2xl font-semibold text-neutral-900 lg:text-3xl">Chat Workspace</h1>
-                <p className="mt-2 max-w-xl text-sm text-neutral-600">
-                  {persona === "Analyst"
-                    ? "📊 Rapid data takes synthesised into slick Markdown dashboards with context-rich tool traces."
-                    : "🧠 Scouting-grade breakdowns with comps, action archetypes, and tactical alignments drawn from your tool calls."}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.3em]">
+              <span className={cn("rounded-full px-3 py-1 shadow-sm", personaTheme.chip)}>
+                {teamContext?.competition_name ?? "Competition TBD"}
+              </span>
+              <span className={cn("rounded-full px-3 py-1 shadow-sm", personaTheme.chip)}>
+                Season {teamContext?.season_label ?? DEFAULT_SEASON_LABEL}
+              </span>
+              {generatedAtDisplay && (
+                <span className="rounded-full border border-white/60 bg-white/70 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-500">
+                  Updated {generatedAtDisplay}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex-1 min-w-[220px] space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {(["Analyst", "Scouting Evaluator"] as Persona[]).map((option) => {
+                  const isActive = persona === option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setPersona(option)}
+                      className={cn(
+                        "rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.3em] transition",
+                        "border border-white/60 bg-white/75 text-neutral-600 hover:bg-white",
+                        isActive && personaTheme.activeButton
+                      )}
+                    >
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-2">
+                <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 md:text-3xl">
+                  Precision reports for {teamContext?.team_name ?? team}
+                </h1>
+                <p className="max-w-2xl text-sm leading-snug text-neutral-600">
+                  {heroSummary}
                 </p>
               </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-600">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 rounded-full border-transparent bg-white/70 px-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-600 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.3)] transition hover:bg-white"
+                  onClick={() => {
+                    void resetConversation();
+                  }}
+                >
+                  <ArrowRight className="mr-2 h-4 w-4 -rotate-45" />
+                  New thread
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 rounded-full border-transparent bg-white/70 px-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-600 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.3)] transition hover:bg-white"
+                  onClick={() => {
+                    void compressConversation();
+                  }}
+                  disabled={!sessionId || compressLoading}
+                >
+                  {compressLoading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                      Summarising…
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-slate-500" />
+                      Summarise
+                    </span>
+                  )}
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 overflow-x-auto pr-2 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-600">
+                {PRESET_TEAMS.map((club) => {
+                  const isActive = team === club;
+                  return (
+                    <button
+                      key={club}
+                      type="button"
+                      onClick={() => setTeam(club)}
+                      className={cn(
+                        "rounded-full px-3 py-1 transition",
+                        "border border-white/60 bg-white/75 hover:bg-white",
+                        isActive && personaTheme.activeButton
+                      )}
+                    >
+                      {club}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 rounded-full border-slate-300 bg-white/70 text-neutral-700 transition hover:bg-white"
-                onClick={() => {
-                  void resetConversation();
-                }}
-              >
-                <ArrowRight className="mr-2 h-4 w-4 -rotate-45" />
-                Reset conversation
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-9 rounded-full border-slate-300 bg-white/70 text-neutral-700 transition hover:bg-white"
-                onClick={() => {
-                  void compressConversation();
-                }}
-                disabled={!sessionId || compressLoading}
-              >
-                {compressLoading ? (
-                  <span className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
-                    Compressing…
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-slate-500" />
-                    Compress & continue
-                  </span>
-                )}
-              </Button>
+
+            <div className="w-full max-w-lg flex-shrink-0">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+                <div
+                  className={cn(
+                    "rounded-xl border p-4 backdrop-blur-sm shadow-[0_18px_38px_-32px_rgba(15,23,42,0.35)]",
+                    personaTheme.statBorder,
+                    personaTheme.statTint
+                  )}
+                >
+                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.35em] text-neutral-500">
+                    <TrendingUp className="h-3.5 w-3.5 text-slate-500" />
+                    Season pulse
+                  </div>
+                  <p className="mt-3 text-lg font-semibold text-neutral-900">{recordDisplay}</p>
+                  <p className="text-xs text-neutral-500">
+                    {teamContext?.season_label ?? DEFAULT_SEASON_LABEL}
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "rounded-xl border p-4 backdrop-blur-sm shadow-[0_18px_38px_-32px_rgba(15,23,42,0.35)]",
+                    personaTheme.statBorder,
+                    personaTheme.statTint
+                  )}
+                >
+                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.35em] text-neutral-500">
+                    <CalendarDays className="h-3.5 w-3.5 text-slate-500" />
+                    Next fixture
+                  </div>
+                  <p className="mt-3 text-sm font-semibold text-neutral-900">{nextMatchInfo.opponent}</p>
+                  <p className="text-xs text-neutral-600">{nextMatchInfo.date}</p>
+                  {nextMatchInfo.venue && (
+                    <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-500">
+                      {nextMatchInfo.venue}
+                    </p>
+                  )}
+                </div>
+                <div
+                  className={cn(
+                    "rounded-xl border p-4 backdrop-blur-sm shadow-[0_18px_38px_-32px_rgba(15,23,42,0.35)]",
+                    personaTheme.statBorder,
+                    personaTheme.statTint
+                  )}
+                >
+                  <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.35em] text-neutral-500">
+                    <MessageCircle className="h-3.5 w-3.5 text-slate-500" />
+                    Session signal
+                  </div>
+                  <p className="mt-3 text-lg font-semibold text-neutral-900">{messageCount}</p>
+                  <p className="text-xs text-neutral-500">Messages in thread</p>
+                  <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-neutral-500">
+                    {activeToolEvents.length > 0
+                      ? `${activeToolEvents.length} tool${activeToolEvents.length === 1 ? "" : "s"} running`
+                      : "Tools idle"}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </header>
+
+        {showToolTimeline && (
+          <div className="px-8 pt-4">
+            <ToolExecutionTimeline toolCalls={activeToolEvents} />
+          </div>
+        )}
 
         {loadingTeam && <p className="px-8 pt-3 text-xs text-neutral-500">Refreshing team context…</p>}
         {teamError && (
@@ -704,16 +948,19 @@ export function ChatPanel() {
         >
           {messages.length === 0 && (
             <div className="relative mx-auto max-w-xl overflow-hidden rounded-3xl border border-white/40 bg-white/85 px-8 py-10 text-center text-sm text-neutral-600 shadow-[0_16px_35px_-24px_rgba(15,23,42,0.2)]">
-              <p className="text-base font-semibold text-neutral-900">Ask about players, fixtures, or scouting fit.</p>
+              <p className="text-base font-semibold text-neutral-900">
+                Launch a scouting prompt to get curated intelligence.
+              </p>
               <p className="mt-3 leading-relaxed">
-                The workspace orchestrates offline indexes, live StatsBomb, and Wyscout layers before surfacing a polished, citeable answer.
+                Blend offline indexes, StatsBomb event detail, and bespoke visualisations without
+                leaving the conversation.
               </p>
               <div className="mt-4 flex justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-neutral-500">
-                <span>Offline Index</span>
+                <span>Context memory</span>
                 <span>•</span>
-                <span>Advanced Viz</span>
+                <span>Advanced viz</span>
                 <span>•</span>
-                <span>Web Sanity</span>
+                <span>Tool traces</span>
               </div>
             </div>
           )}
@@ -728,7 +975,6 @@ export function ChatPanel() {
               attachments={message.attachments}
               toolCalls={message.toolCalls}
               onImagesLoaded={() => {
-                // For the last message, scroll to bottom with some breathing room
                 if (index === messages.length - 1) {
                   scrollToBottom(true, 100);
                 }
@@ -742,12 +988,12 @@ export function ChatPanel() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="border-t border-white/40 bg-white/70 px-6 py-5">
+        <form onSubmit={handleSubmit} className="border-t border-white/35 bg-white/75 px-6 py-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <Textarea
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
-              placeholder="Ask about Bukayo Saka's execution range or scouting fit…"
+              placeholder="Frame a match-day hypothesis or ask for a scouting breakdown…"
               className="h-28 flex-1 resize-none rounded-2xl border-slate-200 bg-white text-sm text-neutral-900 shadow-inner placeholder:text-neutral-500 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
             />
             <Button

@@ -94,6 +94,16 @@ def _system_prompt() -> str:
         "lineups=v4, 360=v2, player season stats=v4, team season stats=v2, "
         "player match stats=v5, team match stats=v1."
     )
+    retrieval_checklist = "\n".join(
+        [
+            "Retrieval checklist (run in this order before drafting an answer):",
+            "1. Inspect prior messages and tool metadata in memory for existing competition, season, team, or player identifiers. Reuse them if they satisfy the new question.",
+            "2. If identifiers are missing, query the offline SQLite index helpers (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) to resolve them with the tightest filters possible.",
+            "3. When IDs are resolved, prefer aggregate StatsBomb helpers (`player_season_summary_tool`, `team_season_summary_tool`, `player_multi_season_summary_tool`, `compare_player_season_summaries_tool`) before any heavy event downloads.",
+            "4. Only if the offline route fails, walk the fallbacks exactly in this order: StatsBomb JSON index (group 'statsbomb-index'), StatsBomb online index helpers (group 'statsbomb-online-index'), StatsBomb network APIs, Wyscout, and finally web search.",
+            "5. After each retrieval hop, store the identifiers in memory so future turns can skip repeated work.",
+        ]
+    )
     guidelines_lines = [
         "Guidelines:",
         "- Before any other lookup, default to the offline SQLite index for resolving identifiers.",
@@ -134,6 +144,7 @@ def _system_prompt() -> str:
         f"When users mention 'this season' default to {season_label} unless context dictates otherwise. "
         f"If a future season is referenced, consider {current_year}/{next_year} next.\n"
         f"{api_versions}\n"
+        f"{retrieval_checklist}\n"
         f"{guidelines}\n\n"
         f"{competition_reference}"
     )
@@ -194,6 +205,16 @@ def _scouting_system_prompt() -> str:
             "- Default to Markdown with section emojis (e.g., 🎯, 🧠, ⚙️)."
         ]
     )
+    retrieval_checklist = "\n".join(
+        [
+            "Retrieval checklist (follow strictly before synthesising scouting insight):",
+            "1. Scan conversation memory for previously resolved IDs (competitions, seasons, matches, players) and reuse them whenever they match the new brief.",
+            "2. Run the offline SQLite index helpers (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) with specific filters to fetch missing IDs.",
+            "3. With IDs in hand, prefer aggregate StatsBomb helpers (`player_season_summary_tool`, `team_season_summary_tool`, `player_multi_season_summary_tool`, `compare_player_season_summaries_tool`) to build the scouting baseline.",
+            "4. Escalate only if coverage is missing, honouring this sequence: StatsBomb JSON index → StatsBomb online index helpers → StatsBomb network APIs → Wyscout → web search.",
+            "5. Cache the identifiers you discover so subsequent turns can skip redundant lookups.",
+        ]
+    )
     expectations_lines = [
         "- Before any deeper analysis, always start with the offline SQLite index. For player, team, or match work, apply the relevant combination of `search_competitions_tool`, `search_teams_tool`, `search_players_tool`, and `search_matches_tool`/`search_match_players_tool` to obtain IDs before touching other tool families.",
         "- Minimise tool calls: review existing context and combine StatsBomb queries so you extract what you need in one pass.",
@@ -223,6 +244,7 @@ def _scouting_system_prompt() -> str:
         f"{modules}\n\n"
         f"{profiling}\n\n"
         "Expectations:\n"
+        f"{retrieval_checklist}\n"
         f"{expectations}\n"
         f"{outputs}\n\n"
         f"{competition_reference}"
