@@ -23,11 +23,11 @@ def _error_response(reason: str, metadata: Optional[Dict[str, Any]] = None) -> T
 
 def plot_pizza_chart_tool(
     player_name: str,
-    metrics: Dict[str, float],
-    comparison_player: Optional[str] = None,
-    comparison_metrics: Optional[Dict[str, float]] = None,
-    colors: Optional[List[str]] = None,
-    output_dir: Optional[str] = None,
+    metrics: dict,
+    comparison_player: str = None,
+    comparison_metrics: dict = None,
+    colors: list = None,
+    output_dir: str = None,
 ) -> ToolResponse:
     """
     Generate a colorful pizza chart for player performance comparison.
@@ -79,7 +79,7 @@ def plot_pizza_chart_tool(
             img_data = f.read()
         b64_data = base64.b64encode(img_data).decode('utf-8')
 
-        # Create image block
+        # Create image block (NO alt field in the block itself)
         image_block = ImageBlock(
             type="image",
             source=Base64Source(
@@ -87,7 +87,6 @@ def plot_pizza_chart_tool(
                 media_type="image/png",
                 data=b64_data,
             ),
-            alt=f"Pizza chart: {player_name}" + (f" vs {comparison_player}" if comparison_player else "")
         )
 
         # Build text summary
@@ -134,7 +133,7 @@ def plot_pizza_chart_tool(
 
 
 def register_advanced_viz_tools(
-    toolkit: Toolkit,
+    toolkit: Optional[Toolkit] = None,
     group_name: str = "advanced-viz",
     activate: bool = True
 ) -> Toolkit:
@@ -142,17 +141,34 @@ def register_advanced_viz_tools(
     Register advanced visualization tools with the agent toolkit.
 
     Args:
-        toolkit: AgentScope Toolkit instance
+        toolkit: AgentScope Toolkit instance (creates new if None)
         group_name: Name for this tool group
         activate: Whether to activate the group immediately
 
     Returns:
         Updated toolkit
     """
-    toolkit.add_function(
+    toolkit = toolkit or Toolkit()
+
+    try:
+        toolkit.create_tool_group(
+            group_name,
+            description="Advanced visualization tools for player analysis and comparison.",
+            active=activate,
+            notes="Generates advanced charts like pizza/radar comparisons using mplsoccer.",
+        )
+    except ValueError:
+        # Group already exists; continue registering functions.
+        if activate:
+            toolkit.update_tool_groups([group_name], active=True)
+    else:
+        if activate:
+            toolkit.update_tool_groups([group_name], active=True)
+
+    toolkit.register_tool_function(
         plot_pizza_chart_tool,
         group_name=group_name,
-        activate=activate
+        func_description="Generate a colorful pizza chart for player performance comparison with percentile rankings.",
     )
 
     return toolkit

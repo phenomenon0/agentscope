@@ -27,6 +27,7 @@ from agentspace.agent_tools.online_index import register_statsbomb_online_index_
 from agentspace.agent_tools.offline_sqlite import register_offline_index_tools
 from agentspace.agent_tools.viz import register_statsbomb_viz_tools
 from agentspace.agent_tools.advanced_viz import register_advanced_viz_tools
+from agentspace.agent_tools.event_analysis import register_event_analysis_tools
 from agentspace.agent_tools.wyscout import register_wyscout_tools
 from agentspace.agent_tools.web_search import register_web_search_tools
 
@@ -95,13 +96,14 @@ def _system_prompt() -> str:
     )
     guidelines_lines = [
         "Guidelines:",
-        "- Before any other lookup, always consult the offline SQLite index: use `search_competitions_tool`, `search_teams_tool`, and `search_players_tool` as relevant before calling networked tools.",
+        "- Before any other lookup, default to the offline SQLite index for resolving identifiers.",
+        "- For player, team, or match queries, use the offline SQLite helpers (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) in the fastest logical combination before touching other tool families. Only move onward when those checks cannot supply the IDs you need.",
         "- Minimise tool calls: check existing metadata before reaching for another tool, and avoid repeating the same lookup with identical arguments.",
         "- Prefer aggregate helpers (season summaries, player lists) before drilling into match-level detail; only fetch full event datasets when required for deeper analysis.",
         "- Default to polished Markdown output with tasteful emoji section markers; only emit raw JSON when the user explicitly provides a template or demands JSON.",
-        "- Prefer ONLINE index tools (group 'statsbomb-online-index') first for fast live ID/roster/match lookups: `list_seasons_online`, `find_player_online`, `find_team_players_online`, `get_player_matches_online`, `resolve_player_current_team_online`.",
-        "- For top-league and continental cup queries, consult the offline SQLite index (group 'offline-index': `search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) before issuing fresh API calls.",
-        "- If online/offline indices lack coverage, fall back to OFFLINE StatsBomb JSON indices (group 'statsbomb-index') if they exist, otherwise use network StatsBomb tools.",
+        "- When offline coverage is insufficient, fall back in this order: StatsBomb JSON indices (group 'statsbomb-index'), StatsBomb online index helpers (group 'statsbomb-online-index'), then full network StatsBomb APIs.",
+        "- StatsBomb online helpers include `list_seasons_online`, `find_player_online`, `find_team_players_online`, `get_player_matches_online`, and `resolve_player_current_team_online`; call them after exhausting the offline sequence.",
+        "- If those still fail, use network StatsBomb tools, then Wyscout, then finally web search.",
         "- Wyscout tools (group 'wyscout') provide competition/season/match listings and event payloads; tap them when StatsBomb coverage is missing or to cross-check results.",
         "- Web search tools (group 'web') offer a lightweight DuckDuckGo proxy; use them as a secondary sanity check when official feeds disagree.",
         "- Only call web search after both StatsBomb online and offline lookups (including player mapping) fail to return relevant results; record why the fallback is required.",
@@ -193,11 +195,11 @@ def _scouting_system_prompt() -> str:
         ]
     )
     expectations_lines = [
-        "- Before any deeper analysis, consult the offline SQLite index (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) to ground cohorts, fixtures, and minute loads.",
+        "- Before any deeper analysis, always start with the offline SQLite index. For player, team, or match work, apply the relevant combination of `search_competitions_tool`, `search_teams_tool`, `search_players_tool`, and `search_matches_tool`/`search_match_players_tool` to obtain IDs before touching other tool families.",
         "- Minimise tool calls: review existing context and combine StatsBomb queries so you extract what you need in one pass.",
         "- Use cached or aggregate helpers before drilling into per-match detail; avoid re-fetching the same dataset with identical arguments.",
         "- Lean on the offline SQLite index (group 'offline-index') for top league and continental cup rosters before issuing new API calls.",
-        "- Gather evidence via StatsBomb tools first, supplement with Wyscout or web search when needed.",
+        "- Gather evidence via StatsBomb tools first. If the offline sequence misses coverage, fall back to StatsBomb JSON indices, then StatsBomb online helpers, then network StatsBomb APIs before considering Wyscout or web search.",
         f"- When you need match identifiers, call `list_team_matches` with `season_name` set to {season_label} (or the user's specified season) and `match_status=['played']` unless they explicitly want future fixtures.",
         "- Never reach for web search until StatsBomb online/offline (including player mapping) options are exhausted and you've explained the gap.",
         "- Translate metrics into the six scouting modules, then synthesise into club-specific insights.",
@@ -370,6 +372,7 @@ def _build_toolkit(
     register_wyscout_tools(toolkit, group_name="wyscout", activate=True)
     register_statsbomb_viz_tools(toolkit, group_name="statsbomb-viz", activate=True)
     register_advanced_viz_tools(toolkit, group_name="advanced-viz", activate=True)
+    register_event_analysis_tools(toolkit, group_name="event-analysis", activate=True)
     register_web_search_tools(toolkit, group_name="web", activate=True)
     return toolkit
 

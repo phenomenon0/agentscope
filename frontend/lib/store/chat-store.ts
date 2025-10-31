@@ -27,6 +27,8 @@ export type ChatMessage = {
   content: string;
   planPreview?: boolean;
   streamingDone?: boolean;
+  statusHint?: "thinking";
+  toolCallNames?: string[];
   attachments?: ChatAttachment[];
   toolCalls?: ToolCall[];
   metadata?: Record<string, unknown>;
@@ -46,6 +48,7 @@ type ChatState = {
   setSessionId: (sessionId: string | null) => void;
   addMessage: (message: ChatMessage) => void;
   updateMessage: (id: string, updater: (message: ChatMessage) => ChatMessage) => void;
+  removeMessage: (id: string) => void;
   clearMessages: () => void;
   setChatError: (message: string | null) => void;
   setIsLoading: (isLoading: boolean) => void;
@@ -74,6 +77,10 @@ export const useChatStore = create<ChatState>((set) => ({
       messages: state.messages.map((message) =>
         message.id === id ? updater(message) : message,
       ),
+    })),
+  removeMessage: (id) =>
+    set((state) => ({
+      messages: state.messages.filter((message) => message.id !== id),
     })),
   clearMessages: () => set({ messages: [] }),
   setChatError: (chatError) => set({ chatError }),

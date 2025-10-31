@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
+import { Sparkles, ArrowRight, Loader2, Send } from "lucide-react";
 import {
   Persona,
   API_BASE_URL,
@@ -17,6 +18,8 @@ import {
 } from "@/lib/store/chat-store";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 const fetcher = async (url: string) => {
   const res = await fetch(url);
@@ -89,11 +92,25 @@ export function ChatPanel() {
   }, [teamData]);
 
   const [inputValue, setInputValue] = useState("");
-  const plannerAbortRef = useRef<AbortController | null>(null);
+  const toolPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+
+  const scrollToBottom = useCallback((instant = false, offset = 0) => {
+    const container = chatContainerRef.current;
+    if (!container) {
+      return;
+    }
+    // Scroll to bottom with optional offset to keep some content visible
+    const scrollTop = container.scrollHeight - container.clientHeight - offset;
+    container.scrollTo({
+      top: Math.max(0, scrollTop),
+      behavior: instant ? "auto" : "smooth"
+    });
+  }, []);
 
   const convertResponseAttachments = useCallback(
     (value: unknown): ChatAttachment[] => {
@@ -246,15 +263,84 @@ export function ChatPanel() {
     [],
   );
 
+  const stopToolPolling = useCallback(() => {
+    if (toolPollRef.current) {
+      clearInterval(toolPollRef.current);
+      toolPollRef.current = null;
+    }
+  }, []);
+
+  const fetchToolCalls = useCallback(
+    async (sessionKey: string, messageId: string) => {
+      if (!sessionKey || !messageId) {
+        return;
+      }
+      try {
+        const response = await fetch(
+          `/api/chat/tool-calls?sessionId=${encodeURIComponent(sessionKey)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json();
+        const toolCalls = Array.isArray(payload.tool_calls) ? payload.tool_calls : [];
+        const toolCallNames = toolCalls
+          .map((call: any) => (typeof call?.tool_name === "string" ? call.tool_name : ""))
+          .filter((name: string): name is string => Boolean(name));
+        const uniqueNames = Array.from(new Set(toolCallNames));
+        updateMessage(messageId, (message) => ({
+          ...message,
+          toolCallNames: uniqueNames,
+          toolCalls: undefined,
+        }));
+        // Don't scroll during tool polling - only on final message
+      } catch (error) {
+        console.error("Tool polling failed", error);
+      }
+    },
+    [updateMessage, scrollToBottom],
+  );
+
+  const startToolPolling = useCallback(
+    (sessionKey: string, messageId: string) => {
+      if (!sessionKey || !messageId) {
+        return;
+      }
+      stopToolPolling();
+
+      const run = () => {
+        void fetchToolCalls(sessionKey, messageId);
+      };
+
+      run();
+      toolPollRef.current = setInterval(run, 1200);
+    },
+    [fetchToolCalls, stopToolPolling],
+  );
+
   useEffect(() => {
     void mutate();
   }, [team, mutate]);
 
-  const resetConversation = useCallback(async () => {
-    if (plannerAbortRef.current) {
-      plannerAbortRef.current.abort();
-      plannerAbortRef.current = null;
+  useEffect(() => {
+    return () => {
+      stopToolPolling();
+    };
+  }, [stopToolPolling]);
+
+  // Only auto-scroll when new messages are added (not on updates)
+  const prevMessageCountRef = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length > prevMessageCountRef.current) {
+      // New message added - scroll smoothly
+      scrollToBottom();
+      prevMessageCountRef.current = messages.length;
     }
+  }, [messages, scrollToBottom]);
+
+  const resetConversation = useCallback(async () => {
+    stopToolPolling();
     const activeSession = sessionIdRef.current;
     if (activeSession) {
       try {
@@ -267,105 +353,15 @@ export function ChatPanel() {
     }
     clearMessages();
     setSessionId(null);
+    sessionIdRef.current = null;
     setChatError(null);
     setReportLoading(null);
     setCompressLoading(false);
-  }, [clearMessages, setChatError, setSessionId, setReportLoading, setCompressLoading]);
+  }, [clearMessages, setChatError, setSessionId, setReportLoading, setCompressLoading, stopToolPolling]);
 
   useEffect(() => {
     void resetConversation();
   }, [persona, team, resetConversation]);
-
-  const streamPlanPreview = useCallback(
-    async (
-      previewId: string,
-      payload: { persona: Persona; message: string; teamContext: typeof teamContext },
-    ) => {
-      plannerAbortRef.current?.abort();
-      const controller = new AbortController();
-      plannerAbortRef.current = controller;
-
-      const placeholder = "Gathering plan from Claude Haiku…";
-      let accumulated = placeholder;
-      const updateContent = (content: string, done = false) => {
-        updateMessage(previewId, (msg) => ({
-          ...msg,
-          content,
-          planPreview: true,
-          streamingDone: done,
-        }));
-      };
-
-      updateContent(accumulated);
-
-      try {
-        const response = await fetch("/api/chat/plan-preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            persona: payload.persona,
-            message: payload.message,
-            teamContext: payload.teamContext,
-          }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok || !response.body) {
-          const fallbackText = await response.text().catch(() => "Plan preview unavailable.");
-          throw new Error(fallbackText || "Plan preview unavailable.");
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) {
-            break;
-          }
-          buffer += decoder.decode(value, { stream: true });
-          let delimiterIndex: number;
-          while ((delimiterIndex = buffer.indexOf("\n\n")) !== -1) {
-            const rawChunk = buffer.slice(0, delimiterIndex).trim();
-            buffer = buffer.slice(delimiterIndex + 2);
-            if (!rawChunk.startsWith("data:")) {
-              continue;
-            }
-            const payloadText = rawChunk.slice(5).trim();
-            if (!payloadText) {
-              continue;
-            }
-            if (payloadText === "[DONE]") {
-              updateContent(accumulated, true);
-              plannerAbortRef.current = null;
-              return;
-            }
-            const stripped = payloadText.replace(/^\*+|\*+$/g, "").trim();
-            if (!stripped) {
-              continue;
-            }
-            accumulated =
-              accumulated === placeholder || !accumulated ? stripped : `${accumulated}\n${stripped}`;
-            updateContent(accumulated);
-          }
-        }
-
-        updateContent(accumulated, true);
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          const message =
-            error instanceof Error ? error.message : "Plan preview unavailable.";
-          updateContent(`Plan preview unavailable: ${message}`, true);
-        }
-      } finally {
-        if (plannerAbortRef.current === controller) {
-          plannerAbortRef.current = null;
-        }
-      }
-    },
-    [updateMessage],
-  );
 
   const handlePlayerReport = useCallback(
     async (player: RosterEntry) => {
@@ -481,11 +477,20 @@ export function ChatPanel() {
   }, [sessionId, addMessage, setChatError, setCompressLoading]);
 
   const sendChatMessage = async () => {
-    if (!inputValue.trim()) {
+    const userContent = inputValue.trim();
+    if (!userContent) {
       return;
     }
 
-    const userContent = inputValue.trim();
+    let activeSession = sessionIdRef.current;
+    if (!activeSession) {
+      activeSession = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2);
+      sessionIdRef.current = activeSession;
+      setSessionId(activeSession);
+    }
+
     const userMessage: ChatMessage = {
       id: makeId(),
       role: "user",
@@ -496,16 +501,18 @@ export function ChatPanel() {
     setIsLoading(true);
     setChatError(null);
 
-    const previewId = makeId();
     addMessage(userMessage);
+
+    const assistantMessageId = makeId();
     addMessage({
-      id: previewId,
+      id: assistantMessageId,
       role: "assistant",
-      content: "Gathering plan from Claude Haiku…",
-      planPreview: true,
+      content: "",
+      statusHint: "thinking",
+      toolCallNames: [],
     });
 
-    void streamPlanPreview(previewId, { persona, message: userContent, teamContext });
+    startToolPolling(activeSession, assistantMessageId);
 
     try {
       const response = await fetch("/api/chat", {
@@ -515,7 +522,7 @@ export function ChatPanel() {
           persona,
           message: userContent,
           teamContext,
-          sessionId,
+          sessionId: activeSession,
         }),
       });
 
@@ -524,7 +531,10 @@ export function ChatPanel() {
         throw new Error(data?.error ?? "Agent execution error.");
       }
 
-      setSessionId(data.session_id ?? null);
+      const nextSessionId: string | null = data.session_id ?? activeSession;
+      setSessionId(nextSessionId);
+      sessionIdRef.current = nextSessionId;
+
       const replyText = typeof data.reply === "string" ? data.reply : JSON.stringify(data.reply ?? "");
       const metadata = data.metadata as Record<string, unknown> | undefined;
       const primaryAttachments = convertResponseAttachments(data.attachments);
@@ -532,19 +542,56 @@ export function ChatPanel() {
       const attachments = mergeAttachments(primaryAttachments, metadataAttachments);
       const toolCalls = Array.isArray(data.tool_calls) ? data.tool_calls : [];
 
-      const assistantMessage: ChatMessage = {
-        id: makeId(),
-        role: "assistant",
-        content: replyText,
-        metadata,
-        ...(attachments.length > 0 ? { attachments } : {}),
-        ...(toolCalls.length > 0 ? { toolCalls } : {}),
-      };
-      addMessage(assistantMessage);
+      updateMessage(assistantMessageId, (message) => {
+        let finalContent = replyText.trim();
+        if (!finalContent) {
+          if (attachments.length > 0) {
+            finalContent = "Generated visuals attached below.";
+          } else if (toolCalls.length > 0) {
+            finalContent = "Tool run completed.";
+          } else {
+            finalContent = "Agent finished with no textual reply.";
+          }
+        }
+        return {
+          ...message,
+          content: finalContent,
+          metadata,
+          attachments: attachments.length > 0 ? attachments : undefined,
+          toolCalls: undefined,
+          toolCallNames: undefined,
+          streamingDone: true,
+          statusHint: undefined,
+        };
+      });
+
+      // Delay scroll to let images render and layout settle
+      // Use multiple RAF to ensure DOM has fully updated
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            scrollToBottom(true); // instant scroll for final message
+
+            // Backup scroll after images have loaded
+            setTimeout(() => {
+              scrollToBottom(true);
+            }, 800);
+          }, 100);
+        });
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Agent execution error.";
       setChatError(message);
+      updateMessage(assistantMessageId, (existing) => ({
+        ...existing,
+        content: message,
+        streamingDone: true,
+        toolCalls: undefined,
+        toolCallNames: undefined,
+        statusHint: undefined,
+      }));
     } finally {
+      stopToolPolling();
       setIsLoading(false);
     }
   };
@@ -558,7 +605,8 @@ export function ChatPanel() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 lg:flex-row">
+    <div className="relative mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pb-12 pt-10 lg:flex-row lg:px-8">
+
       <Sidebar
         persona={persona}
         onPersonaChange={setPersona}
@@ -581,66 +629,110 @@ export function ChatPanel() {
         reportLoading={reportLoading}
       />
 
-      <main className="flex h-[calc(100vh-3rem)] flex-1 flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-xl shadow-black/5">
-        <header className="flex items-start justify-between gap-4 border-b border-neutral-200 bg-neutral-50 px-6 py-5">
-          <div>
-            <h1 className="text-xl font-semibold text-neutral-900">Chat Workspace</h1>
-            <p className="text-sm text-neutral-500">
-            {persona === "Analyst"
-              ? "📊 Rapid data responses with Markdown summaries."
-              : "🧠 Deep scouting breakdown with comparisons, tactical deployment, and development notes."}
-          </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void resetConversation();
-              }}
-            >
-              Reset conversation
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void compressConversation();
-              }}
-              disabled={!sessionId || compressLoading}
-            >
-              {compressLoading ? "Compressing…" : "Compress & continue"}
-            </Button>
+      <main
+        className={cn(
+          "glass-panel relative flex h-[calc(100vh-4.5rem)] flex-1 flex-col overflow-hidden",
+          "rounded-[28px]"
+        )}
+      >
+        <header className="relative border-b border-white/40 bg-white/70 px-8 py-7 backdrop-blur">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-3">
+              <Badge
+                variant="secondary"
+                className="flex w-max items-center gap-2 border border-white/40 bg-white/70 text-xs font-medium uppercase tracking-[0.2em] text-neutral-600"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-slate-500" />
+                Live Analytics Workspace
+              </Badge>
+              <div>
+                <h1 className="text-2xl font-semibold text-neutral-900 lg:text-3xl">Chat Workspace</h1>
+                <p className="mt-2 max-w-xl text-sm text-neutral-600">
+                  {persona === "Analyst"
+                    ? "📊 Rapid data takes synthesised into slick Markdown dashboards with context-rich tool traces."
+                    : "🧠 Scouting-grade breakdowns with comps, action archetypes, and tactical alignments drawn from your tool calls."}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 rounded-full border-slate-300 bg-white/70 text-neutral-700 transition hover:bg-white"
+                onClick={() => {
+                  void resetConversation();
+                }}
+              >
+                <ArrowRight className="mr-2 h-4 w-4 -rotate-45" />
+                Reset conversation
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 rounded-full border-slate-300 bg-white/70 text-neutral-700 transition hover:bg-white"
+                onClick={() => {
+                  void compressConversation();
+                }}
+                disabled={!sessionId || compressLoading}
+              >
+                {compressLoading ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                    Compressing…
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-slate-500" />
+                    Compress & continue
+                  </span>
+                )}
+              </Button>
+            </div>
           </div>
         </header>
 
-        {loadingTeam && <p className="px-6 pt-2 text-xs text-neutral-400">Refreshing team context…</p>}
+        {loadingTeam && <p className="px-8 pt-3 text-xs text-neutral-500">Refreshing team context…</p>}
         {teamError && (
-          <p className="px-6 text-xs text-red-500">Team context error: {teamError.message}</p>
+          <p className="px-8 text-xs text-red-500">Team context error: {teamError.message}</p>
         )}
 
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-6 py-4 scrollbar-thin bg-white">
+        <div
+          ref={chatContainerRef}
+          className="relative flex flex-1 flex-col gap-5 overflow-y-auto px-8 py-6 pb-12 scrollbar-thin"
+        >
           {messages.length === 0 && (
-            <div className="mx-auto max-w-xl rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-6 text-center text-sm text-neutral-600">
-              <p className="text-base font-semibold text-neutral-900">
-                Ask about players, fixtures, or scouting fit.
+            <div className="relative mx-auto max-w-xl overflow-hidden rounded-3xl border border-white/40 bg-white/85 px-8 py-10 text-center text-sm text-neutral-600 shadow-[0_16px_35px_-24px_rgba(15,23,42,0.2)]">
+              <p className="text-base font-semibold text-neutral-900">Ask about players, fixtures, or scouting fit.</p>
+              <p className="mt-3 leading-relaxed">
+                The workspace orchestrates offline indexes, live StatsBomb, and Wyscout layers before surfacing a polished, citeable answer.
               </p>
-              <p className="mt-2">
-                The assistant automatically pulls the latest {team} data and can cross-check
-                live info with the web search tool if something looks off.
-              </p>
+              <div className="mt-4 flex justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-neutral-500">
+                <span>Offline Index</span>
+                <span>•</span>
+                <span>Advanced Viz</span>
+                <span>•</span>
+                <span>Web Sanity</span>
+              </div>
             </div>
           )}
-          {messages.map((message) => (
+          {messages.map((message, index) => (
             <MessageBubble
               key={message.id}
               role={message.role as "user" | "assistant" | "system"}
               content={message.content}
+              statusHint={message.statusHint}
+              toolCallNames={message.toolCallNames}
               planPreview={message.planPreview}
               attachments={message.attachments}
               toolCalls={message.toolCalls}
+              onImagesLoaded={() => {
+                // For the last message, scroll to bottom with some breathing room
+                if (index === messages.length - 1) {
+                  scrollToBottom(true, 100);
+                }
+              }}
             />
           ))}
           {chatError && (
@@ -650,21 +742,30 @@ export function ChatPanel() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="border-t border-neutral-200 bg-neutral-50 p-4">
-          <div className="flex items-end gap-3">
+        <form onSubmit={handleSubmit} className="border-t border-white/40 bg-white/70 px-6 py-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <Textarea
               value={inputValue}
               onChange={(event) => setInputValue(event.target.value)}
               placeholder="Ask about Bukayo Saka's execution range or scouting fit…"
-              className="h-24 flex-1 resize-none"
+              className="h-28 flex-1 resize-none rounded-2xl border-slate-200 bg-white text-sm text-neutral-900 shadow-inner placeholder:text-neutral-500 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
             />
             <Button
               type="submit"
               disabled={isLoading}
               size="lg"
-              className="px-8"
+              className="flex h-14 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-10 text-base font-semibold text-white shadow-[0_16px_28px_-18px_rgba(15,23,42,0.45)] transition hover:bg-slate-800 disabled:bg-slate-400"
             >
-              {isLoading ? "Sending…" : "Send"}
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" /> Sending…
+                </>
+              ) : (
+                <>
+                  Send
+                  <Send className="h-5 w-5" />
+                </>
+              )}
             </Button>
           </div>
         </form>

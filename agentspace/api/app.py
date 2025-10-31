@@ -889,6 +889,23 @@ async def agent_chat(request: ChatRequest) -> ChatResponse:
     )
 
 
+@app.get("/api/agent/tool-calls")
+async def agent_tool_calls(
+    session_id: str = Query(..., min_length=3),
+    max_lookback: int = Query(20, ge=1, le=100),
+) -> Dict[str, Any]:
+    session = _chat_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    try:
+        tool_calls = await _extract_tool_calls_from_memory(session.agent, max_lookback=max_lookback)
+    except Exception as exc:  # pragma: no cover - guard against runtime issues while polling
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve tool calls: {exc}") from exc
+
+    return {"tool_calls": tool_calls}
+
+
 @app.post("/api/agent/plan-preview")
 async def agent_plan_preview(request: ChatRequest) -> StreamingResponse:
     api_key = os.getenv("ANTHROPIC_API_KEY")

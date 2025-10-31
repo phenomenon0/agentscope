@@ -32,13 +32,60 @@
   }
 
   body {
-    @apply bg-neutral-100 text-neutral-900 antialiased;
-    background-image: radial-gradient(circle at top, rgba(15, 118, 110, 0.08), transparent),
-      radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.08), transparent);
+    @apply relative min-h-screen bg-slate-100 text-slate-900 antialiased;
+    background:
+      radial-gradient(circle at 12% 20%, rgba(71, 85, 105, 0.12), transparent 55%),
+      radial-gradient(circle at 88% 10%, rgba(148, 163, 184, 0.08), transparent 60%),
+      linear-gradient(180deg, rgba(248, 250, 252, 0.8), rgba(241, 245, 249, 0.9));
+  }
+
+  body::before,
+  body::after {
+    content: "";
+    position: fixed;
+    inset: -30%;
+    z-index: -1;
+    background: radial-gradient(circle, rgba(148, 163, 184, 0.12), transparent 70%);
+    filter: blur(140px);
+    opacity: 0.45;
+    animation: aurora 28s linear infinite;
+  }
+
+  body::after {
+    animation-direction: reverse;
+    opacity: 0.35;
   }
 }
 
 @layer components {
+  .aurora-ring {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .aurora-ring::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.45), rgba(168, 85, 247, 0.35), rgba(244, 114, 182, 0.4));
+    opacity: 0.7;
+    z-index: -2;
+    filter: blur(18px);
+  }
+
+  .glass-panel {
+    @apply border border-white/30 bg-white/70 backdrop-blur-lg shadow-[0_20px_45px_-30px_rgba(15,23,42,0.25)] transition duration-300;
+  }
+
+  .glass-panel:hover {
+    @apply border-white/40 shadow-[0_25px_60px_-35px_rgba(15,23,42,0.3)];
+  }
+
+  .soft-card {
+    @apply rounded-3xl border border-white/40 bg-white/80 backdrop-blur-lg shadow-[0_18px_35px_-28px_rgba(15,23,42,0.28)];
+  }
+
   .markdown table {
     @apply my-4 w-full border-collapse overflow-hidden rounded-2xl border border-neutral-200 bg-white text-sm text-neutral-700;
   }
@@ -63,6 +110,18 @@
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+}
+
+@keyframes aurora {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.15);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
 }
 
 *::-webkit-scrollbar {

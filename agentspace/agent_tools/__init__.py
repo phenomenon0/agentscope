@@ -33,6 +33,13 @@ from .advanced_viz import (
 from .offline_sqlite import (
     register_offline_index_tools,
 )
+from .event_analysis import (
+    register_event_analysis_tools,
+    get_player_events_ranked_by_metric_tool,
+    get_player_event_sequences_tool,
+    compare_player_events_tool,
+    filter_events_by_context_tool,
+)
 
 __all__ = [
     "register_statsbomb_tools",
@@ -54,4 +61,9 @@ __all__ = [
     "plot_pass_network_tool",
     "plot_pizza_chart_tool",
     "register_offline_index_tools",
+    "register_event_analysis_tools",
+    "get_player_events_ranked_by_metric_tool",
+    "get_player_event_sequences_tool",
+    "compare_player_events_tool",
+    "filter_events_by_context_tool",
 ]
