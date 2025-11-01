@@ -164,6 +164,7 @@ def seeded_season_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "player_season_minutes": 1820,
             "player_season_goals_90": 0.60,
             "player_season_assists_90": 0.28,
+            "player_season_shot_on_target_ratio": 0.55,
             "player_season_progressive_passes": 140,
             "player_season_progressive_passes_90": 5.4,
         },
@@ -178,6 +179,7 @@ def seeded_season_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "player_season_minutes": 1680,
             "player_season_goals_90": 0.42,
             "player_season_assists_90": 0.36,
+            "player_season_shot_on_target_ratio": 0.47,
             "player_season_progressive_passes": 118,
             "player_season_progressive_passes_90": 4.7,
         },
@@ -192,6 +194,7 @@ def seeded_season_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "player_season_minutes": 1945,
             "player_season_goals_90": 0.10,
             "player_season_assists_90": 0.55,
+            "player_season_shot_on_target_ratio": 0.32,
             "player_season_progressive_passes": 96,
             "player_season_progressive_passes_90": 4.4,
         },
@@ -262,6 +265,16 @@ def test_rankings_tool_metric_alias(seeded_season_db: Path) -> None:
     assert response.metadata["results"][0]["metric_value"] == pytest.approx(140)
 
 
+def test_rankings_tool_shots_alias(seeded_season_db: Path) -> None:
+    response = rank_players_by_metric_tool(
+        metric_name="shots_on_target",
+        season_label="2025/2026",
+        competitions="2",
+        db_path=str(seeded_season_db),
+    )
+    assert response.metadata["results"][0]["metric_value"] == pytest.approx(0.55)
+
+
 def test_rank_players_by_suite_tool(seeded_season_db: Path) -> None:
     response = rank_players_by_suite_tool(
         metric_names="player_season_goals_90,player_season_assists_90",
@@ -323,6 +336,16 @@ def test_competition_alias_parsing() -> None:
     ids, names = _parse_competition_filters("Champions League")
     assert ids == [16]
     assert names == []
+
+
+def test_rankings_tool_missing_metric(seeded_season_db: Path) -> None:
+    response = rank_players_by_metric_tool(
+        metric_name="nonexistent_metric",
+        season_label="2025/2026",
+        competitions="2",
+        db_path=str(seeded_season_db),
+    )
+    assert response.metadata.get("error") == "missing_metric"
 
 
 def test_leaderboard_api_endpoint(seeded_season_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:

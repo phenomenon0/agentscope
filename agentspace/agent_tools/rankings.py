@@ -95,12 +95,14 @@ _METRIC_ALIASES = {
     "xa_90": "player_season_expected_assists_90",
     "assists_90": "player_season_assists_90",
     "assists_per90": "player_season_assists_90",
-    "shots_on_target": "player_season_shots_on_target",
-    "shots_on_target_90": "player_season_shots_on_target_90",
-    "shots_on_target_per90": "player_season_shots_on_target_90",
-    "shots": "player_season_shots_total",
-    "shots_90": "player_season_shots_total_90",
-    "shots_per90": "player_season_shots_total_90",
+    "shots_on_target": "player_season_shot_on_target_ratio",
+    "shots_on_target_ratio": "player_season_shot_on_target_ratio",
+    "shot_on_target_ratio": "player_season_shot_on_target_ratio",
+    "shots_on_target_90": "player_season_np_shots_90",
+    "shots_on_target_per90": "player_season_np_shots_90",
+    "shots": "player_season_np_shots_90",
+    "shots_90": "player_season_np_shots_90",
+    "shots_per90": "player_season_np_shots_90",
     "npxg": "player_season_non_penalty_xg",
     "npxg_90": "player_season_non_penalty_xg_90",
 }
@@ -364,6 +366,14 @@ def _display_metric_name(metric: str) -> str:
     return short.replace("_", " ").title()
 
 
+def _metric_exists(conn: sqlite3.Connection, metric_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM player_season_metric WHERE metric_name = ? LIMIT 1",
+        (metric_name,),
+    ).fetchone()
+    return row is not None
+
+
 def _render_markdown_table(rows: Iterable[_RankingQueryResult], metric_name: str) -> str:
     lines = [
         f"| # | Player | Team | Competition | Metric | Percentile | Minutes |",
@@ -435,6 +445,19 @@ def rank_players_by_metric_tool(
 
     try:
         with closing(_open_connection(db_path)) as conn:
+            if not _metric_exists(conn, metric_name):
+                return ToolResponse(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text=(
+                                f"Metric '{metric_name}' is not present in the ranking cache. "
+                                "Call list_ranking_metrics_tool to inspect available metrics."
+                            ),
+                        )
+                    ],
+                    metadata={"error": "missing_metric", "metric": metric_name},
+                )
             cohort_suffix = _resolve_cohort_suffix(conn, position_bucket)
             has_position_col = _column_exists(conn, "player_season_summary", "position")
             position_select = "s.position" if has_position_col else "NULL"
@@ -596,6 +619,7 @@ def player_percentile_snapshot_tool(
     if competition_id is not None:
         comp_ids.append(int(competition_id))
 
+    missing_metrics: List[str] = []
     try:
         with closing(_open_connection(db_path)) as conn:
             cohort_suffix = _resolve_cohort_suffix(conn, position_bucket)
@@ -944,6 +968,7 @@ def rank_players_by_suite_tool(
     order_clause = "DESC" if str(sort_order).lower() != "asc" else "ASC"
     comp_ids, comp_names = _parse_competition_filters(competitions)
 
+    missing_metrics: List[str] = []
     try:
         with closing(_open_connection(db_path)) as conn:
             cohort_suffix = _resolve_cohort_suffix(conn, position_bucket)
@@ -953,6 +978,34 @@ def rank_players_by_suite_tool(
             secondary_position_select = "s.secondary_position" if _column_exists(conn, "player_season_summary", "secondary_position") else "NULL"
             bucket_select = "s.position_bucket" if _column_exists(conn, "player_season_summary", "position_bucket") else "NULL"
             minutes_column = "s.minutes" if _column_exists(conn, "player_season_summary", "minutes") else "COALESCE(s.player_season_minutes, s.minutes_played, 0)"
+
+            available_metrics: List[str] = []
+            for metric in resolved_metrics:
+                if _metric_exists(conn, metric):
+                    available_metrics.append(metric)
+                else:
+                    missing_metrics.append(metric)
+
+            if not available_metrics:
+                return ToolResponse(
+                    content=[
+                        TextBlock(
+                            type="text",
+                            text=(
+                                "None of the requested metrics are present in the season cache. "
+                                "Call list_ranking_metrics_tool to inspect supported metrics."
+                            ),
+                        )
+                    ],
+                    metadata={
+                        "error": "missing_metrics",
+                        "requested_suite": requested_suite,
+                        "requested_metrics": resolved_metrics,
+                    },
+                )
+
+            if missing_metrics:
+                resolved_metrics = available_metrics
 
             select_clauses = []
             metric_params: List[Any] = []
@@ -1108,6 +1161,7 @@ def rank_players_by_suite_tool(
             "metrics": resolved_metrics,
             "primary_metric": primary_metric,
             "results": result_rows,
+            "missing_metrics": missing_metrics,
         },
     )
 
