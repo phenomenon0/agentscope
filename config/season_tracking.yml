@@ -1,0 +1,162 @@
+---
+# Default season-tracking configuration for the season ranking pipeline.
+# Adjust tracked competitions or override via AGENTSPACE_SEASON_CONFIG.
+
+tracked_competitions:
+  - name: "Premier League"
+    competition_id: 2
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+        percentile_positions:
+          - name: "Defenders"
+            include:
+              - "Centre Back"
+              - "Left Back"
+              - "Right Back"
+          - name: "Midfielders"
+            include:
+              - "Defensive Midfield"
+              - "Central Midfield"
+              - "Attacking Midfield"
+          - name: "Forwards"
+            include:
+              - "Left Wing"
+              - "Right Wing"
+              - "Striker"
+              - "Center Forward"
+  - name: "Serie A"
+    competition_id: 12
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+  - name: "La Liga"
+    competition_id: 11
+    seasons:
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+        percentile_positions:
+          - name: "Defenders"
+            include:
+              - "Centre Back"
+              - "Left Back"
+              - "Right Back"
+          - name: "Midfielders"
+            include:
+              - "Defensive Midfield"
+              - "Central Midfield"
+              - "Attacking Midfield"
+          - name: "Forwards"
+            include:
+              - "Left Wing"
+              - "Right Wing"
+              - "Striker"
+              - "Center Forward"
+  - name: "Ligue 1"
+    competition_id: 7
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+  - name: "UEFA Champions League"
+    competition_id: 16
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+  - name: "UEFA Europa League"
+    competition_id: 35
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+  - name: "UEFA Europa Conference League"
+    competition_id: 353
+    seasons:
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 360
+  - name: "FA Cup"
+    competition_id: 69
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+  - name: "Copa del Rey"
+    competition_id: 87
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+  - name: "Coppa Italia"
+    competition_id: 66
+    seasons:
+      - label: "2025/2026"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 600
+  - name: "Coupe de France"
+    competition_id: 86
+    seasons:
+      - label: "2024/2025"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540
+      - label: "2023/2024"
+        min_minutes_percent: 0.2
+        min_minutes_floor: 540

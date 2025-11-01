@@ -40,6 +40,10 @@ from agentspace.services.analytics360 import (
     collect_player_360_metrics,
     collect_team_360_metrics,
 )
+from agentspace.api.leaderboards import (
+    get_player_leaderboard,
+    get_player_percentile_snapshot,
+)
 
 
 app = FastAPI(title="Agentspace API", version="0.1.0")
@@ -771,6 +775,95 @@ def list_players(
         "season_label": season_label,
         "team_name": team_name,
         "players": players,
+    }
+
+
+@app.get("/api/leaderboards/players")
+def player_leaderboard(
+    metric: str = Query(..., min_length=3, alias="metric_name"),
+    season_label: str = Query(..., min_length=3),
+    competitions: Optional[str] = Query(None, description="Comma separated competition IDs or names."),
+    limit: int = Query(10, ge=1, le=50),
+    sort_order: str = Query("desc"),
+    min_minutes: Optional[float] = Query(None, ge=0.0),
+    position_bucket: Optional[str] = Query(None, description="Percentile cohort bucket name."),
+) -> Dict[str, Any]:
+    order = sort_order.lower()
+    if order not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="sort_order must be 'asc' or 'desc'.")
+    text, metadata = get_player_leaderboard(
+        metric_name=metric,
+        season_label=season_label,
+        competitions=competitions,
+        limit=limit,
+        sort_order=order,
+        min_minutes=min_minutes,
+        position_bucket=position_bucket,
+    )
+
+    error_code = metadata.get("error") if isinstance(metadata, Mapping) else None
+    if error_code == "missing_metric":
+        raise HTTPException(status_code=400, detail=text or "Metric name is required.")
+    if error_code == "missing_database":
+        raise HTTPException(status_code=404, detail=text or "Season ranking cache not yet generated.")
+    if error_code == "database_error":
+        raise HTTPException(status_code=500, detail=text or "Failed to read season ranking cache.")
+
+    results = metadata.get("results") if isinstance(metadata, Mapping) else None
+    if not results:
+        raise HTTPException(
+            status_code=404,
+            detail=text or "No leaderboard data found for the requested filters.",
+        )
+
+    description = "Player leaderboard"
+    if text:
+        description = text.strip().split("\n", 1)[0].strip()
+
+    return {
+        "description": description,
+        "table": text,
+        "metadata": metadata,
+    }
+
+
+@app.get("/api/leaderboards/percentile")
+def player_percentile_snapshot(
+    season_label: str = Query(..., min_length=3),
+    player_id: Optional[int] = Query(None, ge=1),
+    player_name: Optional[str] = Query(None, min_length=2),
+    competition_id: Optional[int] = Query(None, ge=1),
+    competitions: Optional[str] = Query(None, description="Comma separated competition IDs or names."),
+    limit: int = Query(12, ge=1, le=40),
+    position_bucket: Optional[str] = Query(None, description="Percentile cohort bucket name."),
+) -> Dict[str, Any]:
+    text, metadata = get_player_percentile_snapshot(
+        season_label=season_label,
+        player_id=player_id,
+        player_name=player_name,
+        competition_id=competition_id,
+        competitions=competitions,
+        limit=limit,
+        position_bucket=position_bucket,
+    )
+
+    error_code = metadata.get("error") if isinstance(metadata, Mapping) else None
+    if error_code in {"missing_season", "missing_player"}:
+        raise HTTPException(status_code=400, detail=text or "Missing required parameters.")
+    if error_code == "missing_database":
+        raise HTTPException(status_code=404, detail=text or "Season ranking cache not yet generated.")
+    if error_code == "database_error":
+        raise HTTPException(status_code=500, detail=text or "Failed to read season ranking cache.")
+
+    metrics = metadata.get("metrics") if isinstance(metadata, Mapping) else None
+    if not metrics:
+        raise HTTPException(status_code=404, detail=text or "No percentile data found for the requested player.")
+
+    summary = text.strip().split("\n", 1)[0].strip() if text else "Player percentile snapshot"
+    return {
+        "summary": summary,
+        "details": text,
+        "metadata": metadata,
     }
 
 

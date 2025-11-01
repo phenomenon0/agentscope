@@ -15,6 +15,13 @@ from .mplsoccer_viz import (
     plot_pass_network,
     PassNetworkResult,
 )
+from .season_summary_store import (
+    SeasonSummaryStore,
+    ingest_from_config,
+    load_season_tracking_config,
+    resolve_config_path,
+    resolve_db_path,
+)
 
 __all__ = [
     "events_to_dataframe",
@@ -28,4 +35,9 @@ __all__ = [
     "ShotMapResult",
     "HeatmapResult",
     "PassNetworkResult",
+    "SeasonSummaryStore",
+    "ingest_from_config",
+    "load_season_tracking_config",
+    "resolve_config_path",
+    "resolve_db_path",
 ]

@@ -1,0 +1,77 @@
+shooting:
+  metrics:
+    - player_season_np_shots_90
+    - player_season_shot_on_target_ratio
+    - player_season_np_xg_90
+    - player_season_conversion_ratio
+  primary_metric: player_season_np_shots_90
+passing:
+  metrics:
+    - player_season_op_passes_90
+    - player_season_pass_completion_rate
+    - player_season_progressive_passes
+    - player_season_op_xa_90
+  primary_metric: player_season_op_passes_90
+chance_creation:
+  metrics:
+    - player_season_key_passes_90
+    - player_season_op_key_passes_90
+    - player_season_op_xa_90
+    - player_season_sp_xa_90
+  primary_metric: player_season_key_passes_90
+pressing:
+  metrics:
+    - player_season_pressures_90
+    - player_season_counterpressures_90
+    - player_season_pressure_regains_90
+    - player_season_padj_pressures_90
+  primary_metric: player_season_pressures_90
+defending:
+  metrics:
+    - player_season_padj_tackles_and_interceptions_90
+    - player_season_interceptions_90
+    - player_season_clearance_90
+    - player_season_blocks_per_shot
+  primary_metric: player_season_padj_tackles_and_interceptions_90
+ball_progression:
+  metrics:
+    - player_season_carries_90
+    - player_season_deep_progressions_90
+    - player_season_obv_dribble_carry_90
+    - player_season_op_xgbuildup_90
+  primary_metric: player_season_carries_90
+goalkeeping:
+  metrics:
+    - player_season_save_ratio
+    - player_season_gsaa_90
+    - player_season_np_psxg_90
+    - player_season_ot_shots_faced_ratio
+  primary_metric: player_season_save_ratio
+aerial_duels:
+  metrics:
+    - player_season_aerial_ratio
+    - player_season_aerial_wins_90
+    - player_season_challenge_ratio
+    - player_season_blocks_per_shot
+  primary_metric: player_season_aerial_wins_90
+crossing:
+  metrics:
+    - player_season_crosses_90
+    - player_season_crossing_ratio
+    - player_season_box_cross_ratio
+    - player_season_passes_into_box_90
+  primary_metric: player_season_crosses_90
+ball_recovery:
+  metrics:
+    - player_season_ball_recoveries_90
+    - player_season_aggressive_actions_90
+    - player_season_pressure_regains_90
+    - player_season_counterpressures_90
+  primary_metric: player_season_ball_recoveries_90
+retention:
+  metrics:
+    - player_season_turnovers_90
+    - player_season_dispossessions_90
+    - player_season_failed_dribbles_90
+    - player_season_dribble_ratio
+  primary_metric: player_season_dribble_ratio

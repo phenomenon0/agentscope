@@ -155,7 +155,11 @@ POPULAR_COMPETITIONS: List[Dict[str, Any]] = [
         "competition_id": 11,
         "name": "La Liga",
         "aliases": ["laliga", "la liga", "spanish la liga"],
-        "season_ids": {},
+        "season_ids": {
+            "2025/2026": 318,
+            "2024/2025": 317,
+            "2023/2024": 281,
+        },
     },
     {
         "competition_id": 9,
@@ -167,13 +171,21 @@ POPULAR_COMPETITIONS: List[Dict[str, Any]] = [
         "competition_id": 12,
         "name": "Serie A",
         "aliases": ["serie a", "italy serie a"],
-        "season_ids": {},
+        "season_ids": {
+            "2025/2026": 318,
+            "2024/2025": 317,
+            "2023/2024": 281,
+        },
     },
     {
         "competition_id": 7,
         "name": "Ligue 1",
         "aliases": ["ligue 1", "french ligue 1"],
-        "season_ids": {},
+        "season_ids": {
+            "2025/2026": 318,
+            "2024/2025": 317,
+            "2023/2024": 281,
+        },
     },
     {
         "competition_id": 6,
@@ -203,43 +215,68 @@ POPULAR_COMPETITIONS: List[Dict[str, Any]] = [
         "competition_id": 16,
         "name": "UEFA Champions League",
         "aliases": ["uefa champions league", "champions league"],
-        "season_ids": {},
+        "season_ids": {
+            "2025/2026": 318,
+            "2024/2025": 317,
+            "2023/2024": 281,
+        },
     },
     {
         "competition_id": 35,
         "name": "UEFA Europa League",
         "aliases": ["uefa europa league", "europa league"],
-        "season_ids": {},
+        "season_ids": {
+            "2025/2026": 318,
+            "2024/2025": 317,
+            "2023/2024": 281,
+        },
     },
     {
         "competition_id": 353,
         "name": "UEFA Europa Conference League",
         "aliases": ["uefa europa conference league", "europa conference league", "conference league", "conference europa"],
-        "season_ids": {},
+        "season_ids": {
+            "2023/2024": 281,
+            "2024/2025": 317,
+            "2025/2026": 318,
+        },
     },
     {
         "competition_id": 69,
         "name": "FA Cup",
         "aliases": ["fa cup", "emirates fa cup"],
-        "season_ids": {},
+        "season_ids": {
+            "2023/2024": 281,
+            "2024/2025": 317,
+        },
     },
     {
         "competition_id": 87,
         "name": "Copa del Rey",
         "aliases": ["copa del rey"],
-        "season_ids": {},
+        "season_ids": {
+            "2023/2024": 281,
+            "2024/2025": 317,
+        },
     },
     {
         "competition_id": 66,
         "name": "Coppa Italia",
         "aliases": ["coppa italia"],
-        "season_ids": {},
+        "season_ids": {
+            "2023/2024": 281,
+            "2024/2025": 317,
+            "2025/2026": 318,
+        },
     },
     {
         "competition_id": 86,
         "name": "Coupe de France",
         "aliases": ["coupe de france", "french cup"],
-        "season_ids": {},
+        "season_ids": {
+            "2023/2024": 281,
+            "2024/2025": 317,
+        },
     },
     {
         "competition_id": 165,
@@ -330,10 +367,10 @@ _FALLBACK_SEASON_IDS = {
     16: 318,   # UEFA Champions League 2025/2026
     35: 318,   # UEFA Europa League 2025/2026
     353: 318,  # UEFA Europa Conference League 2025/2026
-    69: 354,   # FA Cup 2029/2030 (latest available)
-    87: 318,   # Copa del Rey 2025/2026
+    69: 317,   # FA Cup 2024/2025
+    87: 317,   # Copa del Rey 2024/2025
     66: 318,   # Coppa Italia 2025/2026
-    86: 318,   # Coupe de France 2025/2026
+    86: 317,   # Coupe de France 2024/2025
     165: 318,  # DFB Pokal 2025/2026
     77: 318,   # Superliga 2025/2026
     75: 316,   # Allsvenskan 2026 season (single-year)

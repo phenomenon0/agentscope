@@ -12,6 +12,25 @@
 ### Verification
 - Run `plot_event_heatmap_tool` (or any StatsBomb viz tool) for a completed fixture; the tool metadata now includes `images[]` with Base64 payloads that render in the chat UI without additional glue code.
 
+## Season Ranking Pipeline
+
+### Added
+- `agentspace/analytics/season_summary_store.py` manages season summary ingestion, schema creation, percentile computation, and ingestion run logging. Includes helpers to resolve config/DB paths and ingest entire tracking configs.
+- `scripts/update_season_summaries.py` CLI ingests tracked competitions into `.cache/season_summaries.db`, supports dry-run, config/database overrides, and cron-friendly logging.
+- `agentspace/agent_tools/rankings.py` exposes cached leaderboards (`rank_players_by_metric_tool`), player percentile snapshots (`player_percentile_snapshot_tool`), coverage discovery (`list_ranking_coverage_tool`), and metric discovery (`list_ranking_metrics_tool`) under the new `season-rankings` tool group. Metric aliases (e.g. `progressive_passes`) map automatically to stored column names.
+- Metric suite support: `config/ranking_suites.yml`, `list_ranking_suites_tool`, and `rank_players_by_suite_tool` allow bundled leaderboards (shooting, passing, pressing, defending, ball progression, goalkeeping) with composite percentiles.
+- FastAPI endpoints `/api/leaderboards/players` and `/api/leaderboards/percentile` surface leaderboard Markdown and percentile summaries to UI consumers.
+- Documentation: `docs/season-ranking-pipeline.md` outlines configuration, ingestion, toolkit/API usage, testing, and rollout guidance.
+
+### Updated
+- StatsBomb chat agents register the `season-rankings` toolkit and system prompts instruct personas to consult cached leaderboards before hitting network-heavy endpoints.
+- `requirements.txt` now includes `PyYAML` for ingest configuration parsing.
+- Season summary schema upgrades add missing columns (`position`, `primary_position`, `secondary_position`, `position_bucket`, `minutes`, `competition_name`, `metadata_json`) when older caches are detected, avoiding runtime errors against existing SQLite files.
+- Popular competition aliases now recognise `Champions League`, `UCL`, `Europa League`, etc., and season ID mappings were added so the loader caches the last three seasons for Premier League, La Liga, Serie A, Ligue 1, UCL, UEL, UECL, FA Cup, Copa del Rey, Coppa Italia, and Coupe de France out of the box.
+
+### Testing
+- Added `tests/test_season_rankings.py` covering ingestion writes, toolkit responses, and the new API endpoints using a seeded SQLite cache.
+
 ## Offline SQLite Index Enhancements
 
 ### Added

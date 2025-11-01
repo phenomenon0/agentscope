@@ -30,6 +30,7 @@ from agentspace.agent_tools.advanced_viz import register_advanced_viz_tools
 from agentspace.agent_tools.event_analysis import register_event_analysis_tools
 from agentspace.agent_tools.wyscout import register_wyscout_tools
 from agentspace.agent_tools.web_search import register_web_search_tools
+from agentspace.agent_tools.rankings import register_ranking_tools
 
 
 def _load_env_from_file(env_path: Path) -> None:
@@ -100,8 +101,21 @@ def _system_prompt() -> str:
             "1. Inspect prior messages and tool metadata in memory for existing competition, season, team, or player identifiers. Reuse them if they satisfy the new question.",
             "2. If identifiers are missing, query the offline SQLite index helpers (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) to resolve them with the tightest filters possible.",
             "3. When IDs are resolved, prefer aggregate StatsBomb helpers (`player_season_summary_tool`, `team_season_summary_tool`, `player_multi_season_summary_tool`, `compare_player_season_summaries_tool`) before any heavy event downloads.",
-            "4. Only if the offline route fails, walk the fallbacks exactly in this order: StatsBomb JSON index (group 'statsbomb-index'), StatsBomb online index helpers (group 'statsbomb-online-index'), StatsBomb network APIs, Wyscout, and finally web search.",
-            "5. After each retrieval hop, store the identifiers in memory so future turns can skip repeated work.",
+            "4. For leaderboard or 'best X' prompts, call the season ranking coverage helpers (`list_ranking_coverage_tool`, `list_ranking_metrics_tool`) to confirm cached seasons/metrics, then use `rank_players_by_metric_tool` / `player_percentile_snapshot_tool` before touching network-heavy endpoints.",
+            "5. Only if the offline route fails, walk the fallbacks exactly in this order: StatsBomb JSON index (group 'statsbomb-index'), StatsBomb online index helpers (group 'statsbomb-online-index'), StatsBomb network APIs, Wyscout, and finally web search.",
+            "6. After each retrieval hop, store the identifiers in memory so future turns can skip repeated work.",
+        ]
+    )
+
+    tool_hierarchy = "\n".join(
+        [
+            "Tool selection hierarchy:",
+            "1. Leaderboards / 'best X' / top-performer queries → `list_ranking_coverage_tool` → `list_ranking_metrics_tool` → `rank_players_by_metric_tool` or `player_percentile_snapshot_tool` (reuse the metric names returned).",
+            "2. ID resolution → offline index (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`).",
+            "3. Season or player summaries → StatsBomb aggregate helpers (`player_season_summary_tool`, `team_season_summary_tool`, `player_multi_season_summary_tool`, `compare_player_season_summaries_tool`).",
+            "4. If aggregates miss coverage → StatsBomb JSON index, then StatsBomb online index helpers, then network StatsBomb APIs.",
+            "5. Remaining gaps → Wyscout tool group, then web search as the final resort (explain the gap).",
+            "6. Visual explanations → StatsBomb viz / advanced viz once IDs and metrics are locked in.",
         ]
     )
     guidelines_lines = [
@@ -110,6 +124,8 @@ def _system_prompt() -> str:
         "- For player, team, or match queries, use the offline SQLite helpers (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) in the fastest logical combination before touching other tool families. Only move onward when those checks cannot supply the IDs you need.",
         "- Minimise tool calls: check existing metadata before reaching for another tool, and avoid repeating the same lookup with identical arguments.",
         "- Prefer aggregate helpers (season summaries, player lists) before drilling into match-level detail; only fetch full event datasets when required for deeper analysis.",
+        "- Season ranking tools (group 'season-rankings') provide cached leaderboards and percentiles—consult `list_ranking_coverage_tool`/`list_ranking_metrics_tool` and then call the ranking or percentile tools before aggregating new data.",
+        "- When ranking, rely on metric names returned by `list_ranking_metrics_tool` (aliases like 'shots on target', 'progressive passes', 'non-pen xG' map automatically).",
         "- Default to polished Markdown output with tasteful emoji section markers; only emit raw JSON when the user explicitly provides a template or demands JSON.",
         "- When offline coverage is insufficient, fall back in this order: StatsBomb JSON indices (group 'statsbomb-index'), StatsBomb online index helpers (group 'statsbomb-online-index'), then full network StatsBomb APIs.",
         "- StatsBomb online helpers include `list_seasons_online`, `find_player_online`, `find_team_players_online`, `get_player_matches_online`, and `resolve_player_current_team_online`; call them after exhausting the offline sequence.",
@@ -145,6 +161,7 @@ def _system_prompt() -> str:
         f"If a future season is referenced, consider {current_year}/{next_year} next.\n"
         f"{api_versions}\n"
         f"{retrieval_checklist}\n"
+        f"{tool_hierarchy}\n"
         f"{guidelines}\n\n"
         f"{competition_reference}"
     )
@@ -211,14 +228,29 @@ def _scouting_system_prompt() -> str:
             "1. Scan conversation memory for previously resolved IDs (competitions, seasons, matches, players) and reuse them whenever they match the new brief.",
             "2. Run the offline SQLite index helpers (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`) with specific filters to fetch missing IDs.",
             "3. With IDs in hand, prefer aggregate StatsBomb helpers (`player_season_summary_tool`, `team_season_summary_tool`, `player_multi_season_summary_tool`, `compare_player_season_summaries_tool`) to build the scouting baseline.",
-            "4. Escalate only if coverage is missing, honouring this sequence: StatsBomb JSON index → StatsBomb online index helpers → StatsBomb network APIs → Wyscout → web search.",
-            "5. Cache the identifiers you discover so subsequent turns can skip redundant lookups.",
+            "4. For any shortlist or 'best option' brief, call the season ranking coverage helpers (`list_ranking_coverage_tool`, `list_ranking_metrics_tool`) and then `rank_players_by_metric_tool` / `player_percentile_snapshot_tool` before escalating to heavier event datasets.",
+            "5. Escalate only if coverage is missing, honouring this sequence: StatsBomb JSON index → StatsBomb online index helpers → StatsBomb network APIs → Wyscout → web search.",
+            "6. Cache the identifiers you discover so subsequent turns can skip redundant lookups.",
+        ]
+    )
+
+    tool_hierarchy = "\n".join(
+        [
+            "Tool selection hierarchy:",
+            "1. Shortlists / best-fit / ranking briefs → `list_ranking_coverage_tool` → `list_ranking_metrics_tool` → `rank_players_by_metric_tool` or `player_percentile_snapshot_tool` (reuse returned metric names).",
+            "2. ID resolution for competitions/teams/players → offline index (`search_competitions_tool`, `search_teams_tool`, `search_players_tool`, `search_matches_tool`, `search_match_players_tool`).",
+            "3. Baseline scouting summaries → StatsBomb aggregates (`player_season_summary_tool`, `team_season_summary_tool`, `player_multi_season_summary_tool`, `compare_player_season_summaries_tool`).",
+            "4. If aggregates lack data → StatsBomb JSON index, then StatsBomb online index helpers, then network StatsBomb APIs.",
+            "5. Remaining gaps → Wyscout, then web search as a last resort (always explain remaining questions).",
+            "6. Visual or tactical diagrams → StatsBomb viz / advanced viz once IDs and metrics are locked.",
         ]
     )
     expectations_lines = [
         "- Before any deeper analysis, always start with the offline SQLite index. For player, team, or match work, apply the relevant combination of `search_competitions_tool`, `search_teams_tool`, `search_players_tool`, and `search_matches_tool`/`search_match_players_tool` to obtain IDs before touching other tool families.",
         "- Minimise tool calls: review existing context and combine StatsBomb queries so you extract what you need in one pass.",
         "- Use cached or aggregate helpers before drilling into per-match detail; avoid re-fetching the same dataset with identical arguments.",
+        "- Season ranking tools (group 'season-rankings') are the default path to cached leaderboards and percentiles—consult the coverage/metric tools before ranking to ensure the cache covers the brief, then surface rankings or snapshots before building new datasets.",
+        "- When ranking, rely on metric names returned by `list_ranking_metrics_tool`; aliases such as 'shots on target', 'progressive passes', or 'pressures' map automatically.",
         "- Lean on the offline SQLite index (group 'offline-index') for top league and continental cup rosters before issuing new API calls.",
         "- Gather evidence via StatsBomb tools first. If the offline sequence misses coverage, fall back to StatsBomb JSON indices, then StatsBomb online helpers, then network StatsBomb APIs before considering Wyscout or web search.",
         f"- When you need match identifiers, call `list_team_matches` with `season_name` set to {season_label} (or the user's specified season) and `match_status=['played']` unless they explicitly want future fixtures.",
@@ -245,6 +277,7 @@ def _scouting_system_prompt() -> str:
         f"{profiling}\n\n"
         "Expectations:\n"
         f"{retrieval_checklist}\n"
+        f"{tool_hierarchy}\n"
         f"{expectations}\n"
         f"{outputs}\n\n"
         f"{competition_reference}"
@@ -394,6 +427,7 @@ def _build_toolkit(
     register_wyscout_tools(toolkit, group_name="wyscout", activate=True)
     register_statsbomb_viz_tools(toolkit, group_name="statsbomb-viz", activate=True)
     register_advanced_viz_tools(toolkit, group_name="advanced-viz", activate=True)
+    register_ranking_tools(toolkit, group_name="season-rankings", activate=True)
     register_event_analysis_tools(toolkit, group_name="event-analysis", activate=True)
     register_web_search_tools(toolkit, group_name="web", activate=True)
     return toolkit
